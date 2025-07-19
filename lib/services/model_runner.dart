@@ -318,7 +318,10 @@ class ModelRunner {
     
     // Direct questions that need direct answers
     if (lowerInput.contains('what is') && lowerInput.split(' ').length <= 8) {
-      return _handleDirectQuestion(originalInput);
+      String directAnswer = _handleDirectQuestion(originalInput);
+      if (directAnswer.isNotEmpty) {
+        return directAnswer;
+      }
     }
     
     // Math calculations
@@ -405,15 +408,64 @@ class ModelRunner {
     final question = input.toLowerCase().trim();
     
     // Simple knowledge base for common questions
-    if (question.contains('what is ai')) {
-      return "AI (Artificial Intelligence) refers to computer systems that can perform tasks typically requiring human intelligence, such as learning, reasoning, and problem-solving.";
+    if (question.contains('what is ai') || question.contains('artificial intelligence')) {
+      return '''**Artificial Intelligence (AI)** is the simulation of human intelligence in machines that are programmed to think, learn, and problem-solve like humans.
+
+**Key Components:**
+• **Machine Learning**: Systems that improve through experience and data
+• **Natural Language Processing**: Understanding and generating human language  
+• **Computer Vision**: Interpreting visual information
+• **Reasoning**: Drawing conclusions from available information
+
+**Types of AI:**
+• **Narrow AI**: Specialized for specific tasks (like voice assistants, image recognition)
+• **General AI**: Human-level intelligence across all domains (theoretical)
+• **Superintelligence**: Beyond human cognitive abilities (hypothetical)
+
+**Applications:**
+• Medical diagnosis and drug discovery
+• Autonomous vehicles and transportation
+• Language translation and communication
+• Scientific research and data analysis
+• Resource optimization and conservation
+
+AI systems learn from patterns in data to make predictions and decisions, helping solve complex problems more efficiently than traditional computing methods.''';
     }
     
     if (question.contains('what is flutter')) {
       return "Flutter is Google's UI toolkit for building natively compiled applications for mobile, web, and desktop from a single codebase using the Dart programming language.";
     }
     
-    return "I'd be happy to help answer that question! Could you provide more context or ask about a specific topic I can assist with?";
+    if (question.contains('solar disinfection') || (question.contains('solar') && question.contains('disinfection'))) {
+      return '''**Solar Disinfection (SODIS)** is a simple, effective method for purifying water using only sunlight and plastic bottles.
+
+**How it works:**
+• Fill clear plastic bottles (PET works best) with contaminated water
+• Remove air bubbles and cap tightly
+• Lay bottles horizontally in direct sunlight for 6+ hours
+• UV-A radiation (315-400nm) penetrates the plastic and kills pathogens
+
+**Scientific Process:**
+• UV radiation damages DNA/RNA of bacteria, viruses, and parasites
+• Heat (temperatures above 50°C/122°F) enhances the disinfection process
+• Oxygen dissolved in water creates reactive molecules that aid sterilization
+
+**Effectiveness:**
+• Kills 99.9% of bacteria, viruses, and parasites
+• Effective against cholera, typhoid, hepatitis, and diarrhea-causing organisms
+• Works best in tropical/subtropical regions with strong sunlight
+
+**Requirements:**
+• Clear plastic bottles (avoid colored or scratched bottles)
+• Clean water (pre-filter if very cloudy)
+• 6+ hours of bright sunlight (can extend to 2 days if partially cloudy)
+• Temperatures ideally above 30°C (86°F)
+
+This method requires no electricity, chemicals, or complex equipment - just sunlight and plastic bottles.''';
+    }
+    
+    // Don't return the generic message - let it fall through to other handlers
+    return "";
   }
 
   bool _isMathExpression(String input) {
@@ -524,11 +576,320 @@ class ModelRunner {
   }
   
   String _analyzeComplexInput(String input) {
-    if (input.contains('?')) {
-      return "Based on your question, I'll do my best to provide a comprehensive answer. Let me break this down systematically to address the key points you've raised.";
+    String lowerInput = input.toLowerCase();
+    
+    // Emergency context analysis
+    bool isEmergencyRelated = _isEmergencyContext(lowerInput);
+    bool isMedicalRelated = _isMedicalContext(lowerInput);
+    bool isSafetyRelated = _isSafetyContext(lowerInput);
+    bool isResourceRelated = _isResourceContext(lowerInput);
+    
+    if (isEmergencyRelated || isMedicalRelated || isSafetyRelated) {
+      return _handleEmergencyInput(input, lowerInput);
     }
     
-    return "I can help analyze, explain, or provide information about the topic you've described. What specific aspect would you like me to focus on?";
+    if (isResourceRelated) {
+      return _handleResourceInput(input, lowerInput);
+    }
+    
+    // Technical or educational questions
+    if (lowerInput.contains('how') || lowerInput.contains('what') || lowerInput.contains('why')) {
+      return _handleEducationalInput(input, lowerInput);
+    }
+    
+    // General assistance with context-aware response
+    return _generateContextualResponse(input, lowerInput);
+  }
+
+  bool _isEmergencyContext(String input) {
+    List<String> emergencyKeywords = [
+      'emergency', 'urgent', 'help', 'danger', 'crisis', 'attack', 'bomb', 
+      'injured', 'bleeding', 'unconscious', 'fire', 'explosion', 'trapped',
+      'shelter', 'evacuation', 'safe', 'safety', 'threat', 'wounded'
+    ];
+    return emergencyKeywords.any((keyword) => input.contains(keyword));
+  }
+
+  bool _isMedicalContext(String input) {
+    List<String> medicalKeywords = [
+      'medical', 'doctor', 'medicine', 'treatment', 'pain', 'sick', 'illness',
+      'infection', 'wound', 'fever', 'first aid', 'hospital', 'health',
+      'symptom', 'disease', 'injury', 'hurt', 'broken', 'cut', 'burn'
+    ];
+    return medicalKeywords.any((keyword) => input.contains(keyword));
+  }
+
+  bool _isSafetyContext(String input) {
+    List<String> safetyKeywords = [
+      'protect', 'secure', 'hide', 'escape', 'building', 'collapse', 'debris',
+      'gas', 'chemical', 'toxic', 'radiation', 'contamination', 'smoke'
+    ];
+    return safetyKeywords.any((keyword) => input.contains(keyword));
+  }
+
+  bool _isResourceContext(String input) {
+    List<String> resourceKeywords = [
+      'water', 'food', 'battery', 'power', 'electricity', 'fuel', 'energy',
+      'communication', 'phone', 'internet', 'signal', 'conservation'
+    ];
+    return resourceKeywords.any((keyword) => input.contains(keyword));
+  }
+
+  String _handleEmergencyInput(String input, String lowerInput) {
+    if (lowerInput.contains('bomb') || lowerInput.contains('explosion') || lowerInput.contains('attack')) {
+      return '''<response>
+<summary>Move to secure location immediately, stay low, cover ears and mouth</summary>
+<detailed_answer>
+**Immediate Actions:**
+• Drop to ground, cover head with hands
+• Move away from windows, glass, and tall structures
+• Seek solid cover (concrete walls, basements, interior rooms)
+• If outside: lie flat in ditch or depression, face down
+• Cover nose and mouth with cloth to filter debris
+• Stay calm and help others nearby
+
+**After Initial Safety:**
+• Check for injuries - stop bleeding with direct pressure
+• Create visual signals for rescue (bright cloth, reflective items)
+• Conserve phone battery - use sparingly for essential communication
+• Stay hydrated - small sips if water available
+• Document injuries and damage for medical teams
+</detailed_answer>
+<additional_info>
+Underground spaces, concrete structures, and interior rooms provide best protection from blasts and debris. Visual signals work better than audio in noisy environments.
+</additional_info>
+</response>''';
+    }
+
+    if (lowerInput.contains('injured') || lowerInput.contains('bleeding') || lowerInput.contains('wound')) {
+      return '''<response>
+<summary>Stop bleeding with direct pressure, elevate if possible, keep person conscious</summary>
+<detailed_answer>
+**For Bleeding:**
+• Apply direct pressure with cleanest cloth available
+• Elevate injured area above heart level if possible
+• Do NOT remove embedded objects - stabilize around them
+• If blood soaks through, add more cloth on top (don't remove first layer)
+
+**For Unconsciousness:**
+• Check breathing - tilt head back slightly to open airway
+• Recovery position: on side, top leg bent, head supported
+• Monitor breathing every few minutes
+
+**Improvised Medical Supplies:**
+• Clean cloth: torn shirts, scarves, towels
+• Pressure points: press artery against bone above wound
+• Splints: straight sticks, rolled magazines, cardboard
+• Pain relief: cold water, distraction, keeping person talking
+</detailed_answer>
+<additional_info>
+Clean water is crucial for wound care. Boiled and cooled water, or bottled water should be used. Honey has natural antibacterial properties if available.
+</additional_info>
+</response>''';
+    }
+
+    if (lowerInput.contains('fire') || lowerInput.contains('smoke')) {
+      return '''<response>
+<summary>Stay low under smoke, exit quickly, never use elevators</summary>
+<detailed_answer>
+**Fire Escape:**
+• Crawl under smoke - breathable air is near floor
+• Feel doors with back of hand before opening
+• If door is hot, find alternative exit
+• Close doors behind you to slow fire spread
+• Never use elevators during fire
+
+**If Trapped:**
+• Seal door cracks with wet cloth
+• Signal from window with bright materials
+• Stay low near floor
+• Cover nose and mouth with wet cloth
+• Make noise to attract attention
+
+**Smoke Inhalation Prevention:**
+• Wet cloth over nose and mouth
+• Take small breaths through nose
+• If possible, breathe through multiple layers of fabric
+</detailed_answer>
+<additional_info>
+Most fire deaths are from smoke inhalation, not burns. Carbon monoxide is odorless - any smoke is dangerous. Wet clothing provides better protection than dry.
+</additional_info>
+</response>''';
+    }
+
+    // General emergency response
+    return '''<response>
+<summary>Assess immediate danger, secure yourself first, then help others</summary>
+<detailed_answer>
+**Priority Assessment:**
+1. **Immediate danger** - Move to safety first
+2. **Medical emergencies** - Life-threatening injuries take priority
+3. **Shelter and protection** - Secure safe location
+4. **Communication** - Signal for help if possible
+5. **Resource management** - Conserve water, food, battery
+
+**Emergency Actions:**
+• Remove yourself from immediate danger
+• Check for injuries on yourself and others
+• Find or create secure shelter
+• Establish communication if possible
+• Begin resource conservation immediately
+
+**Stress Management:**
+• Take slow, deep breaths
+• Focus on immediate, actionable tasks
+• Help others to maintain group morale
+• Conserve energy for essential activities
+</detailed_answer>
+<additional_info>
+Your safety enables you to help others. Secure your own position before assisting others. Small actions and preparation can make significant differences in emergency situations.
+</additional_info>
+</response>''';
+  }
+
+  String _handleResourceInput(String input, String lowerInput) {
+    if (lowerInput.contains('water')) {
+      return '''<response>
+<summary>Purify water using sun, heat, or filtration with available materials</summary>
+<detailed_answer>
+**Solar Disinfection (SODIS):**
+• Clear plastic bottles + 6 hours direct sunlight
+• UV rays kill bacteria, viruses, parasites
+• Works best at temperatures above 30°C (86°F)
+
+**Heat Purification:**
+• Boil water for 1-3 minutes using any heat source
+• Solar cookers, wood fires, or improvised heating
+• Let cool completely before drinking
+
+**Natural Filtration:**
+• Multiple layers: sand, gravel, charcoal
+• Cloth pre-filtering for very dirty water
+• Plant-based: moringa seeds, banana peels
+• Clay pot filters if clay is available
+
+**Emergency Collection:**
+• Morning dew from plants/surfaces
+• Rainwater (avoid first runoff from roofs)
+• Solar stills using plastic sheets and containers
+</detailed_answer>
+<additional_info>
+Clean water is critical for wound care and preventing disease. Even muddy water can be purified using these methods. Conserve clean water for drinking and medical use first.
+</additional_info>
+</response>''';
+    }
+
+    if (lowerInput.contains('battery') || lowerInput.contains('power') || lowerInput.contains('energy')) {
+      return '''<response>
+<summary>Minimize screen use, disable unnecessary features, use airplane mode strategically</summary>
+<detailed_answer>
+**Battery Conservation:**
+• Lower screen brightness to minimum usable level
+• Turn off WiFi, Bluetooth, GPS when not needed
+• Use airplane mode, enable only for essential communication
+• Close background apps and disable notifications
+• Turn off vibration and reduce volume
+
+**Charging Alternatives:**
+• Solar power banks or panels if available
+• Hand-crank chargers
+• Car chargers from vehicles with working batteries
+• Laptop USB ports if laptop has remaining power
+
+**Communication Strategy:**
+• Save battery for emergency calls only
+• Send location data first in any communication
+• Use text messages instead of calls (uses less power)
+• Group important information into single messages
+
+**Power Management:**
+• Rotate phone use among group members
+• Use one device as primary communication hub
+• Keep backup devices completely powered off until needed
+</detailed_answer>
+<additional_info>
+Modern phones can last 2-5 days with aggressive power management. Location sharing and emergency contacts should be your communication priority.
+</additional_info>
+</response>''';
+    }
+
+    return '''<response>
+<summary>Identify, conserve, and optimize available resources for survival</summary>
+<detailed_answer>
+**Resource Priority:**
+1. **Air/Breathing** - Ensure clear airways and safe air quality
+2. **Shelter** - Protection from elements and threats
+3. **Water** - 3-day survival limit, purification methods critical
+4. **Food** - Can survive weeks, but maintain energy for essential tasks
+5. **Communication** - Signal for help and coordinate with others
+
+**Conservation Techniques:**
+• Ration supplies to last longer than expected need
+• Share resources within groups for efficiency
+• Repurpose items for multiple uses
+• Create stockpiles in secure locations
+• Document consumption to manage supplies
+
+**Community Coordination:**
+• Pool resources with trusted neighbors
+• Establish distribution systems
+• Share knowledge and skills
+• Rotate responsibilities to prevent exhaustion
+</detailed_answer>
+<additional_info>
+Resource sharing often multiplies effectiveness. One person's surplus can address another's critical need. Community cooperation significantly improves survival odds.
+</additional_info>
+</response>''';
+  }
+
+  String _handleEducationalInput(String input, String lowerInput) {
+    if (lowerInput.contains('how') && lowerInput.contains('work')) {
+      return _provideHowItWorksExplanation(input, lowerInput);
+    }
+    
+    if (lowerInput.contains('what') && lowerInput.contains('is')) {
+      return _provideDefinitionExplanation(input, lowerInput);
+    }
+    
+    if (lowerInput.contains('why')) {
+      return _provideReasoningExplanation(input, lowerInput);
+    }
+    
+    return "I can provide detailed explanations on technical, scientific, and practical topics. Could you be more specific about what aspect you'd like to understand?";
+  }
+
+  String _provideHowItWorksExplanation(String input, String lowerInput) {
+    if (lowerInput.contains('solar')) {
+      return "Solar technology converts sunlight into usable energy through photovoltaic cells (electricity) or thermal systems (heat). Photons from sunlight knock electrons loose in semiconductor materials, creating electrical current.";
+    }
+    
+    if (lowerInput.contains('filter')) {
+      return "Filtration works through physical barriers and chemical processes. Materials like sand strain out particles, while activated charcoal adsorbs chemicals and toxins through surface area contact.";
+    }
+    
+    return "I can explain the mechanisms behind various technologies and natural processes. Which specific system or process would you like me to break down?";
+  }
+
+  String _provideDefinitionExplanation(String input, String lowerInput) {
+    // Use existing AI definition if AI-related
+    if (lowerInput.contains('ai') || lowerInput.contains('artificial intelligence')) {
+      return _handleDirectQuestion(input);
+    }
+    
+    return "I can provide comprehensive definitions with context and examples. What specific term or concept would you like me to explain?";
+  }
+
+  String _provideReasoningExplanation(String input, String lowerInput) {
+    return "I can explain the reasoning behind processes, decisions, and phenomena. What specific 'why' question do you have about scientific, technical, or practical matters?";
+  }
+
+  String _generateContextualResponse(String input, String lowerInput) {
+    // Determine context and provide appropriate guidance
+    if (input.length > 50) {
+      return "I've analyzed your detailed question. To provide the most helpful response, could you specify which aspect is most important for your immediate situation?";
+    }
+    
+    return "I can provide practical, actionable information on a wide range of topics. Please let me know what specific information you need or what problem you're trying to solve.";
   }
 
   List<int> _tokenizeForGeneration(String input) {

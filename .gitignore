@@ -177,11 +177,15 @@ android/app/google-services.json
 
 
 
-# Large model files
-assets/models/
-models/
-*.tflite
-*.lite
+# Large model files - store actual model binaries here
+model_files/
+*.gguf
+*.bin
+*.safetensors
+*.pth
+*.pt
+*.onnx
+large_models/
 
 # Claude generated files (optional)
 .claude/

@@ -3,6 +3,7 @@ import 'dart:math';
 import '../models/chat_message.dart';
 import '../models/ai_model.dart';
 import 'model_runner.dart';
+import 'native_model_service.dart';
 
 class ChatService {
   static final ChatService _instance = ChatService._internal();
@@ -10,26 +11,78 @@ class ChatService {
   ChatService._internal();
 
   final ModelRunner _modelRunner = ModelRunner();
+  final NativeModelService _nativeModelService = NativeModelService();
   final Map<String, ChatSession> _sessions = {};
   final Map<String, StreamController<ChatMessage>> _streamControllers = {};
   
   AIModel? _currentModel;
   bool _isModelLoaded = false;
+  bool _useNativeModel = false;
 
   // Getters
   bool get isModelLoaded => _isModelLoaded;
   AIModel? get currentModel => _currentModel;
+  bool get isUsingNativeModel => _useNativeModel;
 
-  // Initialize the chat service
+  // Initialize the chat service with preference for native models
   Future<void> initialize() async {
     try {
+      // First try to load a native C++ model
+      final availableNativeModels = await _nativeModelService.getAvailableModelFiles();
+      if (availableNativeModels.isNotEmpty) {
+        final firstModel = availableNativeModels.first;
+        final nativeModel = await _nativeModelService.loadModel(firstModel);
+        if (nativeModel != null) {
+          _currentModel = nativeModel;
+          _isModelLoaded = true;
+          _useNativeModel = true;
+          return;
+        }
+      }
+
+      // Fallback to TFLite model
       _currentModel = await _modelRunner.loadModel('assets/models/phi2_demo_placeholder.tflite');
       _isModelLoaded = true;
-      print('Chat service initialized successfully');
+      _useNativeModel = false;
     } catch (e) {
-      print('Error initializing chat service: $e');
       _isModelLoaded = false;
+      _useNativeModel = false;
     }
+  }
+
+  // Load a specific native model
+  Future<bool> loadNativeModel(String modelPath) async {
+    try {
+      final nativeModel = await _nativeModelService.loadModel(modelPath);
+      if (nativeModel != null) {
+        _currentModel = nativeModel;
+        _isModelLoaded = true;
+        _useNativeModel = true;
+        return true;
+      }
+      return false;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  // Get available native model files
+  Future<List<String>> getAvailableNativeModels() async {
+    return await _nativeModelService.getAvailableModelFiles();
+  }
+
+  // Get model status and system information
+  Future<Map<String, dynamic>> getModelStatus() async {
+    final nativeStatus = _nativeModelService.getModelStatus();
+    final systemInfo = await _nativeModelService.getSystemInfo();
+    
+    return {
+      'current_model_type': _useNativeModel ? 'native_cpp' : 'tflite',
+      'is_loaded': _isModelLoaded,
+      'model_info': _currentModel?.toJson(),
+      'native_model_status': nativeStatus,
+      'system_info': systemInfo,
+    };
   }
 
   // Create a new chat session
@@ -45,7 +98,7 @@ class ChatService {
     _sessions[sessionId] = session;
     _streamControllers[sessionId] = StreamController<ChatMessage>.broadcast();
     
-    print('Created new chat session: $sessionId');
+    // Session created successfully
     return sessionId;
   }
 
@@ -117,7 +170,14 @@ class ChatService {
       // Generate full response from AI
       String fullResponse;
       if (_isModelLoaded && _currentModel != null) {
-        fullResponse = await _modelRunner.runInference(_currentModel!, userMessage);
+        // Add emergency context to the prompt for AI models
+        String contextualPrompt = _addEmergencyContext(userMessage);
+        
+        if (_useNativeModel) {
+          fullResponse = await _nativeModelService.generateResponse(contextualPrompt);
+        } else {
+          fullResponse = await _modelRunner.runInference(_currentModel!, contextualPrompt);
+        }
       } else {
         fullResponse = _getFallbackResponse(userMessage);
       }
@@ -174,6 +234,27 @@ class ChatService {
     }
   }
 
+  // Add emergency context to prompts for AI models
+  String _addEmergencyContext(String userMessage) {
+    return '''You are NaseerAI, an emergency assistance AI designed for Gaza crisis support. You must provide:
+
+1. IMMEDIATE, actionable solutions using available materials
+2. Offline-first guidance (no internet required)
+3. Clear, stress-appropriate language
+4. Life safety prioritization
+
+Context: User is in emergency/crisis situation with limited resources.
+
+User message: $userMessage
+
+Response format:
+<response>
+<summary>One-sentence actionable summary</summary>
+<detailed_answer>Step-by-step solution with available materials</detailed_answer>
+<additional_info>Critical related emergency information</additional_info>
+</response>''';
+  }
+
   // Get fallback response when AI model is not available
   String _getFallbackResponse(String input) {
     final lowerInput = input.toLowerCase();
@@ -223,7 +304,60 @@ These methods use readily available natural elements like sunlight, sand, plants
 These sources are sustainable because they naturally replenish faster than we consume them.''';
     }
 
-    return "I'm designed to provide comprehensive answers on topics like water purification, renewable energy, science, and technology. Feel free to ask me anything! For example, you could ask about 'How to clean water with natural elements?' or 'What is solar energy?'";
+    // Handle specific AI/technology questions
+    if (lowerInput.contains('artificial intelligence') || lowerInput.contains('ai') || lowerInput.contains('machine learning')) {
+      return '''**Artificial Intelligence (AI)** is the simulation of human intelligence in machines that are programmed to think, learn, and problem-solve like humans.
+
+**Key Components:**
+• **Machine Learning**: Systems that improve through experience and data
+• **Natural Language Processing**: Understanding and generating human language  
+• **Computer Vision**: Interpreting visual information
+• **Reasoning**: Drawing conclusions from available information
+
+**Types of AI:**
+• **Narrow AI**: Specialized for specific tasks (like voice assistants, image recognition)
+• **General AI**: Human-level intelligence across all domains (theoretical)
+• **Superintelligence**: Beyond human cognitive abilities (hypothetical)
+
+**Applications:**
+• Medical diagnosis and drug discovery
+• Autonomous vehicles and transportation
+• Language translation and communication
+• Scientific research and data analysis
+• Resource optimization and conservation
+
+AI systems learn from patterns in data to make predictions and decisions, helping solve complex problems more efficiently than traditional computing methods.''';
+    }
+
+    // Enhanced fallback with emergency awareness
+    String inputLower = input.toLowerCase();
+    
+    // Check for emergency context first
+    if (inputLower.contains('emergency') || inputLower.contains('help') || inputLower.contains('urgent')) {
+      return '''I understand you need assistance. While I'm running in offline mode, I can still provide guidance on:
+
+• **Emergency safety protocols** - immediate danger response
+• **Medical first aid** - injury treatment with available materials  
+• **Resource management** - water purification, power conservation
+• **Communication methods** - signaling for help without internet
+
+What specific situation do you need help with? Please describe your immediate concern.''';
+    }
+    
+    // Contextual suggestions based on input analysis
+    if (inputLower.contains('water') || inputLower.contains('thirsty') || inputLower.contains('drink')) {
+      return "I can help with water purification using natural methods. Ask me about solar disinfection, sand filtration, or emergency water collection techniques.";
+    }
+    
+    if (inputLower.contains('power') || inputLower.contains('battery') || inputLower.contains('energy')) {
+      return "I can guide you on battery conservation, alternative charging methods, and energy management strategies for emergency situations.";
+    }
+    
+    if (inputLower.contains('safe') || inputLower.contains('protect') || inputLower.contains('danger')) {
+      return "I can provide safety protocols for various emergency situations. Please describe what type of danger or safety concern you're facing.";
+    }
+    
+    return "I can provide practical, offline solutions for emergency situations, resource management, and survival techniques. What specific challenge are you facing or what would you like to learn about?";
   }
 
   // Get suggested questions based on conversation context
@@ -261,12 +395,14 @@ These sources are sustainable because they naturally replenish faster than we co
 
   List<String> _getDefaultSuggestions() {
     return [
-      "How to clean water with natural elements?",
-      "Explain renewable energy sources",
-      "What is artificial intelligence?",
-      "How does solar disinfection work?",
-      "Tell me about sustainable technologies",
-      "What are natural filtration methods?",
+      "How to purify water without electricity?",
+      "Emergency first aid for bleeding wounds",
+      "Battery conservation during power outages",
+      "Safe shelter during bombing attacks",
+      "Food preservation without refrigeration",
+      "Signal for help without internet",
+      "Treat injuries with household items",
+      "Stay warm without heating systems",
     ];
   }
 
@@ -275,7 +411,7 @@ These sources are sustainable because they naturally replenish faster than we co
     _sessions.remove(sessionId);
     _streamControllers[sessionId]?.close();
     _streamControllers.remove(sessionId);
-    print('Deleted chat session: $sessionId');
+    // Session deleted successfully
   }
 
   // Clear all sessions
@@ -285,7 +421,7 @@ These sources are sustainable because they naturally replenish faster than we co
     }
     _sessions.clear();
     _streamControllers.clear();
-    print('Cleared all chat sessions');
+    // All sessions cleared successfully
   }
 
   // Generate unique session ID
