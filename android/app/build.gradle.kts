@@ -27,7 +27,28 @@ android {
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+
+        // NDK configuration for native C++ library
+        ndk {
+            abiFilters.addAll(listOf("arm64-v8a", "armeabi-v7a", "x86_64"))
+        }
+
+        // External native build configuration - DISABLED
+        // externalNativeBuild {
+        //     cmake {
+        //         arguments("-DCMAKE_BUILD_TYPE=Release")
+        //         cppFlags("-std=c++17")
+        //     }
+        // }
     }
+
+    // External native build configuration - DISABLED
+    // externalNativeBuild {
+    //     cmake {
+    //         path = file("src/main/cpp/CMakeLists.txt")
+    //         version = "3.22.1"
+    //     }
+    // }
 
     buildTypes {
         release {

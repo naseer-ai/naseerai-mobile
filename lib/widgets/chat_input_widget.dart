@@ -3,13 +3,21 @@ import 'package:flutter/material.dart';
 class ChatInputWidget extends StatefulWidget {
   final TextEditingController controller;
   final Function(String) onSend;
+  final VoidCallback? onStop;
+  final VoidCallback? onShowSuggestions;
   final bool enabled;
+  final bool isStreaming;
+  final bool showSuggestionsButton;
 
   const ChatInputWidget({
     super.key,
     required this.controller,
     required this.onSend,
+    this.onStop,
+    this.onShowSuggestions,
     this.enabled = true,
+    this.isStreaming = false,
+    this.showSuggestionsButton = false,
   });
 
   @override
@@ -42,7 +50,7 @@ class _ChatInputWidgetState extends State<ChatInputWidget> {
 
   void _handleSend() {
     final text = widget.controller.text.trim();
-    if (text.isNotEmpty && widget.enabled) {
+    if (text.isNotEmpty && widget.enabled && !widget.isStreaming) {
       widget.onSend(text);
     }
   }
@@ -50,7 +58,7 @@ class _ChatInputWidgetState extends State<ChatInputWidget> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    
+
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
@@ -69,10 +77,10 @@ class _ChatInputWidgetState extends State<ChatInputWidget> {
             Expanded(
               child: Container(
                 decoration: BoxDecoration(
-                  color: theme.colorScheme.surfaceVariant,
+                  color: theme.colorScheme.surfaceContainerHighest,
                   borderRadius: BorderRadius.circular(24),
                   border: Border.all(
-                    color: theme.colorScheme.outline.withOpacity(0.3),
+                    color: theme.colorScheme.outline.withValues(alpha: 0.3),
                   ),
                 ),
                 child: Row(
@@ -92,53 +100,112 @@ class _ChatInputWidgetState extends State<ChatInputWidget> {
                             vertical: 12,
                           ),
                         ),
-                        onSubmitted: widget.enabled ? (_) => _handleSend() : null,
+                        onSubmitted: (!widget.isStreaming && widget.enabled)
+                            ? (_) => _handleSend()
+                            : null,
                       ),
                     ),
-                    
+
+                    // Suggestions button (when suggestions are hidden)
+                    if (widget.showSuggestionsButton &&
+                        widget.onShowSuggestions != null)
+                      Material(
+                        color: Colors.transparent,
+                        child: InkWell(
+                          onTap: widget.onShowSuggestions,
+                          borderRadius: BorderRadius.circular(20),
+                          child: Padding(
+                            padding: const EdgeInsets.all(8),
+                            child: Icon(
+                              Icons.lightbulb_outline,
+                              size: 20,
+                              color: theme.colorScheme.onSurface
+                                  .withValues(alpha: 0.6),
+                            ),
+                          ),
+                        ),
+                      ),
+
                     // Future: Attachment button for file uploads
                     // Currently disabled for this version
                   ],
                 ),
               ),
             ),
-            
+
             const SizedBox(width: 8),
-            
-            // Send button
+
+            // Send/Stop button
             AnimatedContainer(
-              duration: const Duration(milliseconds: 200),
-              child: FloatingActionButton.small(
-                onPressed: widget.enabled && _hasText ? _handleSend : null,
-                backgroundColor: widget.enabled && _hasText 
-                    ? theme.colorScheme.primary 
-                    : theme.colorScheme.outline,
-                elevation: widget.enabled && _hasText ? 4 : 0,
-                child: AnimatedSwitcher(
-                  duration: const Duration(milliseconds: 200),
-                  child: widget.enabled
-                      ? Icon(
-                          Icons.send,
-                          key: const ValueKey('send'),
-                          color: _hasText ? Colors.white : theme.colorScheme.onSurface.withOpacity(0.5),
-                        )
-                      : SizedBox(
-                          width: 20,
-                          height: 20,
-                          key: const ValueKey('loading'),
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                            valueColor: AlwaysStoppedAnimation<Color>(
-                              theme.colorScheme.onSurface.withOpacity(0.5),
-                            ),
-                          ),
-                        ),
-                ),
-              ),
+              duration: const Duration(milliseconds: 300),
+              child: widget.isStreaming
+                  ? FloatingActionButton.small(
+                      onPressed: widget.onStop,
+                      backgroundColor: Colors.red.shade600,
+                      elevation: 4,
+                      heroTag: "stop_button",
+                      child: const Icon(
+                        Icons.stop,
+                        color: Colors.white,
+                        size: 20,
+                      ),
+                    )
+                  : FloatingActionButton.small(
+                      onPressed:
+                          widget.enabled && _hasText ? _handleSend : null,
+                      backgroundColor: _getButtonColor(theme),
+                      elevation: _getButtonElevation(),
+                      heroTag: "send_button",
+                      child: AnimatedSwitcher(
+                        duration: const Duration(milliseconds: 200),
+                        child: _getButtonIcon(theme),
+                      ),
+                    ),
             ),
           ],
         ),
       ),
+    );
+  }
+
+  Color _getButtonColor(ThemeData theme) {
+    if (!widget.enabled) {
+      return theme.colorScheme.surfaceContainerHighest;
+    }
+    if (_hasText) {
+      return theme.colorScheme.primary;
+    }
+    return theme.colorScheme.surfaceContainerHighest;
+  }
+
+  double _getButtonElevation() {
+    if (!widget.enabled) return 0;
+    if (_hasText) return 6;
+    return 2;
+  }
+
+  Widget _getButtonIcon(ThemeData theme) {
+    if (!widget.enabled) {
+      return SizedBox(
+        width: 18,
+        height: 18,
+        key: const ValueKey('loading'),
+        child: CircularProgressIndicator(
+          strokeWidth: 2,
+          valueColor: AlwaysStoppedAnimation<Color>(
+            theme.colorScheme.onSurface.withValues(alpha: 0.4),
+          ),
+        ),
+      );
+    }
+
+    return Icon(
+      Icons.send_rounded,
+      key: const ValueKey('send'),
+      color: _hasText
+          ? Colors.white
+          : theme.colorScheme.onSurface.withValues(alpha: 0.4),
+      size: 20,
     );
   }
 }

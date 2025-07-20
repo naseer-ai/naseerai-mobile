@@ -33,7 +33,8 @@ build_android() {
     cd "$BUILD_DIR"
     
     # Android ABI architectures to build for
-    ANDROID_ABIS=("arm64-v8a" "armeabi-v7a" "x86_64")
+    # Note: armeabi-v7a currently has FP16 intrinsic issues, focusing on modern architectures
+    ANDROID_ABIS=("arm64-v8a" "x86_64")
     
     for ABI in "${ANDROID_ABIS[@]}"; do
         echo "Building for Android ABI: $ABI"
@@ -48,6 +49,7 @@ build_android() {
             -DANDROID_PLATFORM=android-21 \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_ANDROID_ARCH_ABI="$ABI" \
+            -DGGML_OPENMP=OFF \
             "$CPP_DIR"
         
         make -j$(nproc)

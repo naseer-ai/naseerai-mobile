@@ -5,14 +5,33 @@
 #include <algorithm>
 #include <random>
 #include <ctime>
+#include "llama.h"
 
 struct TextGenerator::ModelData {
+    // Legacy fields for compatibility
     std::vector<float> weights;
     std::vector<std::string> vocabulary;
     int vocab_size = 0;
     int hidden_size = 0;
     int num_layers = 0;
     bool use_pattern_fallback = true;
+    
+    // llama.cpp integration
+    llama_model* llama_model = nullptr;
+    llama_context* llama_context = nullptr;
+    std::string model_path;
+    
+    // Destructor to clean up llama.cpp resources
+    ~ModelData() {
+        if (llama_context) {
+            llama_free(llama_context);
+            llama_context = nullptr;
+        }
+        if (llama_model) {
+            llama_model_free(llama_model);
+            llama_model = nullptr;
+        }
+    }
 };
 
 TextGenerator::TextGenerator() : m_data(std::make_unique<ModelData>()) {
@@ -23,18 +42,26 @@ TextGenerator::~TextGenerator() = default;
 
 bool TextGenerator::load_model(const std::string& model_path) {
     try {
-        std::ifstream file(model_path, std::ios::binary);
-        if (!file.is_open()) {
-            // Model file not found, use pattern-based responses
-            m_data->use_pattern_fallback = true;
-            m_loaded = true;
-            return true;
-        }
-        
-        // Try to load actual model file (GGUF, safetensors, etc.)
+        // Use ModelLoader to load the model with llama.cpp support
         ModelLoader loader;
-        if (loader.load_from_file(model_path, *m_data)) {
-            m_data->use_pattern_fallback = false;
+        ::ModelData model_data;  // Use the global ModelData from model_loader.h
+        
+        if (loader.load_from_file(model_path, model_data)) {
+            // Copy relevant data from ModelLoader's ModelData to TextGenerator's ModelData
+            m_data->vocab_size = model_data.vocab_size;
+            m_data->hidden_size = model_data.hidden_size;
+            m_data->num_layers = model_data.num_layers;
+            m_data->use_pattern_fallback = model_data.use_pattern_fallback;
+            
+            // Transfer llama.cpp resources (transfer ownership)
+            m_data->llama_model = model_data.llama_model;
+            m_data->llama_context = model_data.llama_context;
+            m_data->model_path = model_data.model_path;
+            
+            // Prevent double cleanup by nullifying in the temporary object
+            model_data.llama_model = nullptr;
+            model_data.llama_context = nullptr;
+            
             m_loaded = true;
             return true;
         } else {
@@ -56,13 +83,113 @@ std::string TextGenerator::generate(const std::string& prompt, int max_tokens) {
         return "Error: Model not loaded";
     }
     
-    if (m_data->use_pattern_fallback) {
+    if (m_data->use_pattern_fallback || !m_data->llama_model) {
         return generate_pattern_response(prompt);
     }
     
-    // If we have a real model loaded, implement proper inference here
-    // For now, fallback to pattern-based responses
-    return generate_pattern_response(prompt);
+    // Use llama.cpp for real inference
+    try {
+        return generate_with_llama(prompt, max_tokens);
+    } catch (const std::exception& e) {
+        return "Error during inference: " + std::string(e.what());
+    }
+}
+
+std::string TextGenerator::generate_with_llama(const std::string& prompt, int max_tokens) {
+    if (!m_data->llama_model) {
+        return "Error: llama model not loaded";
+    }
+    
+    // Create context if not exists
+    if (!m_data->llama_context) {
+        llama_context_params ctx_params = llama_context_default_params();
+        ctx_params.n_ctx = 2048;        // Context size
+        ctx_params.n_batch = 512;       // Batch size for prompt processing
+        ctx_params.n_threads = 4;       // Number of threads (good for mobile)
+        
+        m_data->llama_context = llama_init_from_model(m_data->llama_model, ctx_params);
+        
+        if (!m_data->llama_context) {
+            return "Error: Failed to create llama context";
+        }
+    }
+    
+    // Tokenize the prompt
+    std::vector<llama_token> tokens_list;
+    tokens_list.resize(prompt.length() + 1);
+    
+    const llama_vocab* vocab = llama_model_get_vocab(m_data->llama_model);
+    int n_tokens = llama_tokenize(vocab, prompt.c_str(), prompt.length(), 
+                                  tokens_list.data(), tokens_list.size(), true, true);
+    
+    if (n_tokens < 0) {
+        tokens_list.resize(-n_tokens);
+        n_tokens = llama_tokenize(vocab, prompt.c_str(), prompt.length(), 
+                                  tokens_list.data(), tokens_list.size(), true, true);
+        if (n_tokens < 0) {
+            return "Error: Failed to tokenize prompt";
+        }
+    }
+    
+    tokens_list.resize(n_tokens);
+    
+    // Process the prompt
+    if (llama_decode(m_data->llama_context, llama_batch_get_one(tokens_list.data(), n_tokens))) {
+        return "Error: Failed to process prompt";
+    }
+    
+    // Generate response
+    std::string response;
+    int n_generated = 0;
+    
+    while (n_generated < max_tokens) {
+        // Sample next token
+        llama_token next_token = sample_token(m_data->llama_context);
+        
+        // Check for end of sequence
+        const llama_vocab* vocab = llama_model_get_vocab(m_data->llama_model);
+        if (next_token == llama_vocab_eos(vocab)) {
+            break;
+        }
+        
+        // Convert token to text
+        char token_str[256];
+        int token_len = llama_token_to_piece(vocab, next_token, token_str, sizeof(token_str), 0, false);
+        
+        if (token_len > 0) {
+            response.append(token_str, token_len);
+        }
+        
+        // Process the new token
+        if (llama_decode(m_data->llama_context, llama_batch_get_one(&next_token, 1))) {
+            break;
+        }
+        
+        n_generated++;
+    }
+    
+    return response;
+}
+
+llama_token TextGenerator::sample_token(llama_context* ctx) {
+    // Get logits for the last token
+    float* logits = llama_get_logits_ith(ctx, -1);
+    const llama_vocab* vocab = llama_model_get_vocab(llama_get_model(ctx));
+    int n_vocab = llama_vocab_n_tokens(vocab);
+    
+    // Simple greedy sampling (take the most likely token)
+    // For better results, you could implement temperature sampling, top-k, or top-p
+    llama_token max_token = 0;
+    float max_logit = logits[0];
+    
+    for (int i = 1; i < n_vocab; i++) {
+        if (logits[i] > max_logit) {
+            max_logit = logits[i];
+            max_token = i;
+        }
+    }
+    
+    return max_token;
 }
 
 std::string TextGenerator::generate_pattern_response(const std::string& prompt) {

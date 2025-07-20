@@ -284,6 +284,12 @@ flutter build ios --release
 
 ### Common Issues
 
+**Native Library Loading Errors (Android)**:
+- Error: `dlopen failed: library "libllama.so" not found`
+- Error: `dlopen failed: library "libomp.so" not found`
+- Solution: Run `make copy-libs` or `./scripts/fix_openmp.sh` for OpenMP issues
+- See [Native Library Fix Guide](docs/NATIVE_LIBRARY_FIX.md) for detailed instructions
+
 **Model Loading Errors**: Ensure your `.tflite` file is properly placed in `assets/models/`
 
 **Build Errors**: Run `flutter clean` and `flutter pub get`

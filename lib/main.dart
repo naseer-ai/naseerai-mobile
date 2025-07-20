@@ -1,8 +1,14 @@
 import 'package:flutter/material.dart';
-import 'screens/home_screen.dart';
 import 'screens/chat_screen.dart';
+import 'screens/capsules_screen.dart';
+import 'services/model_manager.dart';
 
-void main() {
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  
+  // Initialize model setup
+  await ModelManager.instance.setupQwen2Model();
+  
   runApp(const NaseerAIApp());
 }
 
@@ -47,21 +53,21 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
   
   final List<Widget> _screens = [
     const ChatScreen(),
-    const HomeScreen(),
+    const CapsulesScreen(),
   ];
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       body: IndexedStack(
-        index: _currentIndex,
+        index: _currentIndex.clamp(0, _screens.length - 1),
         children: _screens,
       ),
       bottomNavigationBar: NavigationBar(
-        selectedIndex: _currentIndex,
+        selectedIndex: _currentIndex.clamp(0, _screens.length - 1),
         onDestinationSelected: (index) {
           setState(() {
-            _currentIndex = index;
+            _currentIndex = index.clamp(0, _screens.length - 1);
           });
         },
         destinations: const [
@@ -71,9 +77,9 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
             label: 'Chat',
           ),
           NavigationDestination(
-            icon: Icon(Icons.terminal_outlined),
-            selectedIcon: Icon(Icons.terminal),
-            label: 'Console',
+            icon: Icon(Icons.extension_outlined),
+            selectedIcon: Icon(Icons.extension),
+            label: 'Capsules',
           ),
         ],
       ),

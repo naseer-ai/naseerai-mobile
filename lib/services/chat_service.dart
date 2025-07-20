@@ -2,8 +2,10 @@ import 'dart:async';
 import 'dart:math';
 import '../models/chat_message.dart';
 import '../models/ai_model.dart';
+import '../models/search_result.dart';
 import 'model_runner.dart';
 import 'native_model_service.dart';
+import 'capsule_search_service.dart';
 
 class ChatService {
   static final ChatService _instance = ChatService._internal();
@@ -11,51 +13,83 @@ class ChatService {
   ChatService._internal();
 
   final ModelRunner _modelRunner = ModelRunner();
-  final NativeModelService _nativeModelService = NativeModelService();
+  final NativeModelService _nativeModelService = NativeModelService.instance;
+  final CapsuleSearchService _capsuleSearchService = CapsuleSearchService();
   final Map<String, ChatSession> _sessions = {};
   final Map<String, StreamController<ChatMessage>> _streamControllers = {};
-  
+  final Map<String, bool> _streamingCancellation = {};
+
   AIModel? _currentModel;
   bool _isModelLoaded = false;
   bool _useNativeModel = false;
+  
+  // Performance optimization: Keep model loaded
+  bool _modelPersistentlyLoaded = false;
+  String? _loadedModelPath;
+  
+  // Timeout configuration
+  static const Duration _responseTimeout = Duration(seconds: 30);
+  static const Duration _modelLoadTimeout = Duration(seconds: 60);
 
   // Getters
   bool get isModelLoaded => _isModelLoaded;
   AIModel? get currentModel => _currentModel;
   bool get isUsingNativeModel => _useNativeModel;
 
-  // Initialize the chat service with preference for native models
+  // Initialize the chat service with auto-model detection (ANR-safe)
   Future<void> initialize() async {
     try {
-      // First try to load a native C++ model
-      final availableNativeModels = await _nativeModelService.getAvailableModelFiles();
-      if (availableNativeModels.isNotEmpty) {
-        final firstModel = availableNativeModels.first;
-        final nativeModel = await _nativeModelService.loadModel(firstModel);
-        if (nativeModel != null) {
-          _currentModel = nativeModel;
-          _isModelLoaded = true;
-          _useNativeModel = true;
-          return;
-        }
-      }
+      print('🚀 Initializing ChatService...');
 
-      // Fallback to TFLite model
-      _currentModel = await _modelRunner.loadModel('assets/models/phi2_demo_placeholder.tflite');
-      _isModelLoaded = true;
-      _useNativeModel = false;
+      // Initialize capsule search service in background
+      await Future.microtask(() async {
+        await _capsuleSearchService.initialize();
+      });
+
+      // Auto-detect and load model in background to prevent ANR
+      _initializeModelInBackground();
+      
+      print('📋 ChatService initialized - model loading in background');
     } catch (e) {
+      print('⚠️ ChatService initialization error: $e');
       _isModelLoaded = false;
       _useNativeModel = false;
+      _currentModel = null;
     }
+  }
+
+  /// Initialize model in background to prevent UI blocking
+  void _initializeModelInBackground() {
+    Future.microtask(() async {
+      try {
+        // Add delay to let UI render first
+        await Future.delayed(const Duration(milliseconds: 100));
+        
+        final modelLoaded = await _nativeModelService.autoLoadBestModel();
+        _isModelLoaded = modelLoaded;
+        _useNativeModel = modelLoaded;
+
+        if (modelLoaded) {
+          _currentModel = _nativeModelService.activeModel;
+          print('✅ Background model loading completed successfully');
+        } else {
+          print('📋 Using intelligent fallback responses');
+        }
+      } catch (e) {
+        print('⚠️ Background model loading error: $e');
+        _isModelLoaded = false;
+        _useNativeModel = false;
+        _currentModel = null;
+      }
+    });
   }
 
   // Load a specific native model
   Future<bool> loadNativeModel(String modelPath) async {
     try {
-      final nativeModel = await _nativeModelService.loadModel(modelPath);
-      if (nativeModel != null) {
-        _currentModel = nativeModel;
+      final success = await _nativeModelService.loadModel(modelPath);
+      if (success) {
+        _currentModel = _nativeModelService.activeModel;
         _isModelLoaded = true;
         _useNativeModel = true;
         return true;
@@ -75,7 +109,7 @@ class ChatService {
   Future<Map<String, dynamic>> getModelStatus() async {
     final nativeStatus = _nativeModelService.getModelStatus();
     final systemInfo = await _nativeModelService.getSystemInfo();
-    
+
     return {
       'current_model_type': _useNativeModel ? 'native_cpp' : 'tflite',
       'is_loaded': _isModelLoaded,
@@ -94,10 +128,10 @@ class ChatService {
       lastActivity: DateTime.now(),
       messages: [],
     );
-    
+
     _sessions[sessionId] = session;
     _streamControllers[sessionId] = StreamController<ChatMessage>.broadcast();
-    
+
     // Session created successfully
     return sessionId;
   }
@@ -128,6 +162,9 @@ class ChatService {
       throw Exception('Session not found: $sessionId');
     }
 
+    // Reset cancellation flag for this session
+    _streamingCancellation[sessionId] = false;
+
     // Create user message
     final userMessage = ChatMessage(
       id: _generateMessageId(),
@@ -139,7 +176,7 @@ class ChatService {
 
     // Add user message to session
     _sessions[sessionId] = session.addMessage(userMessage);
-    
+
     // Emit user message to stream
     _streamControllers[sessionId]?.add(userMessage);
 
@@ -147,8 +184,50 @@ class ChatService {
     await _generateStreamingResponse(sessionId, content);
   }
 
-  // Generate streaming AI response
-  Future<void> _generateStreamingResponse(String sessionId, String userMessage) async {
+  // Stop streaming for a session
+  void stopStreaming(String sessionId) {
+    _streamingCancellation[sessionId] = true;
+
+    // Find the currently streaming message and mark it as completed
+    final session = _sessions[sessionId];
+    if (session != null) {
+      final streamingMessage = session.messages.lastWhere(
+        (msg) => msg.status == MessageStatus.streaming,
+        orElse: () => ChatMessage(
+          id: '',
+          content: '',
+          type: MessageType.assistant,
+          timestamp: DateTime.now(),
+          status: MessageStatus.completed,
+        ),
+      );
+
+      if (streamingMessage.id.isNotEmpty) {
+        final stoppedMessage = ChatMessage(
+          id: streamingMessage.id,
+          content: '${streamingMessage.content} [Response stopped]',
+          type: MessageType.assistant,
+          timestamp: streamingMessage.timestamp,
+          status: MessageStatus.completed,
+        );
+
+        _sessions[sessionId] =
+            session.updateMessage(streamingMessage.id, stoppedMessage);
+        _streamControllers[sessionId]?.add(stoppedMessage);
+      }
+    }
+  }
+
+  // Check if streaming is active for a session
+  bool isStreaming(String sessionId) {
+    final session = _sessions[sessionId];
+    if (session == null) return false;
+
+    return session.messages.any((msg) => msg.status == MessageStatus.streaming);
+  } // Generate streaming AI response
+
+  Future<void> _generateStreamingResponse(
+      String sessionId, String userMessage) async {
     final session = _sessions[sessionId];
     if (session == null) return;
 
@@ -167,279 +246,347 @@ class ChatService {
       _sessions[sessionId] = session.addMessage(initialAiMessage);
       _streamControllers[sessionId]?.add(initialAiMessage);
 
-      // Generate full response from AI
       String fullResponse;
-      if (_isModelLoaded && _currentModel != null) {
-        // Add emergency context to the prompt for AI models
-        String contextualPrompt = _addEmergencyContext(userMessage);
-        
-        if (_useNativeModel) {
-          fullResponse = await _nativeModelService.generateResponse(contextualPrompt);
-        } else {
-          fullResponse = await _modelRunner.runInference(_currentModel!, contextualPrompt);
-        }
-      } else {
-        fullResponse = _getFallbackResponse(userMessage);
+
+      try {
+        // Use optimized response generation with timeout
+        fullResponse = await _generateOptimizedResponse(userMessage).timeout(
+          _responseTimeout,
+          onTimeout: () => "Response timed out after ${_responseTimeout.inSeconds} seconds. Please try a shorter message.",
+        );
+      } catch (e) {
+        print('Error generating response: $e');
+        fullResponse = await _generateFallbackResponse(userMessage);
       }
 
-      // Simulate streaming by sending chunks
+      // Check if streaming was cancelled
+      if (_streamingCancellation[sessionId] == true) {
+        return;
+      }
+
+      // Simulate streaming by breaking response into chunks
       await _streamResponse(sessionId, aiMessageId, fullResponse);
 
     } catch (e) {
-      // Handle error
+      print('Error in _generateStreamingResponse: $e');
+      // Send error message
       final errorMessage = ChatMessage(
         id: _generateMessageId(),
-        content: 'Sorry, I encountered an error processing your message.',
+        content: 'Sorry, I encountered an error. Please try again.',
         type: MessageType.assistant,
         timestamp: DateTime.now(),
-        status: MessageStatus.error,
-        error: e.toString(),
+        status: MessageStatus.completed,
       );
-
-      final updatedSession = session.addMessage(errorMessage);
-      _sessions[sessionId] = updatedSession;
+      _sessions[sessionId] = session.addMessage(errorMessage);
       _streamControllers[sessionId]?.add(errorMessage);
     }
   }
 
-  // Stream response word by word
-  Future<void> _streamResponse(String sessionId, String messageId, String fullResponse) async {
-    final session = _sessions[sessionId];
-    if (session == null) return;
-
-    final words = fullResponse.split(' ');
-    String currentContent = '';
-
-    for (int i = 0; i < words.length; i++) {
-      currentContent += (i > 0 ? ' ' : '') + words[i];
+  /// Optimized response generation with semantic search integration
+  Future<String> _generateOptimizedResponse(String userMessage) async {
+    try {
+      // Step 1: Search capsules for relevant knowledge FIRST
+      print('Searching local knowledge capsules...');
+      final capsuleResults = await _capsuleSearchService.search(userMessage);
       
-      final updatedMessage = ChatMessage(
-        id: messageId,
-        content: currentContent,
-        type: MessageType.assistant,
-        timestamp: DateTime.now(),
-        status: i == words.length - 1 ? MessageStatus.completed : MessageStatus.streaming,
-      );
+      // Step 2: Ensure model is loaded and ready
+      if (!_modelPersistentlyLoaded) {
+        await _loadAndPersistModel();
+      }
 
-      // Update session
-      _sessions[sessionId] = session.updateMessage(messageId, updatedMessage);
+      // Step 3: If we have relevant capsule data, enhance the prompt with context
+      String enhancedPrompt = userMessage;
+      if (capsuleResults.hasResults && _hasRelevantResults(capsuleResults)) {
+        enhancedPrompt = _createEnhancedPrompt(userMessage, capsuleResults);
+        print('Enhanced prompt with ${capsuleResults.results.length} relevant knowledge pieces');
+      }
+
+      // Step 4: Try to use the native model service with enhanced prompt
+      print('Attempting response generation with native model service...');
+      final response = await _nativeModelService.generateResponse(enhancedPrompt);
       
-      // Emit updated message
-      _streamControllers[sessionId]?.add(updatedMessage);
+      // Check if we got a real response (not a fallback message)
+      if (response.isNotEmpty && 
+          !response.contains('having trouble generating') && 
+          !response.contains('install knowledge capsules')) {
+        return response;
+      }
 
-      // Add delay for streaming effect
-      if (i < words.length - 1) {
-        await Future.delayed(Duration(milliseconds: 50 + Random().nextInt(100)));
+      // Step 5: If model fails but we have capsules, use capsule-only response
+      if (capsuleResults.hasResults && _hasRelevantResults(capsuleResults)) {
+        return await _addEmergencyContextWithCapsules(userMessage, capsuleResults);
+      }
+
+      // Step 6: If we got a fallback, try direct llama service
+      if (_isModelLoaded && _useNativeModel) {
+        print('Trying direct LlamaService response generation...');
+        final llamaResponse = await _nativeModelService.llamaService.generateResponse(enhancedPrompt);
+        if (llamaResponse.isNotEmpty && !llamaResponse.contains('Error:')) {
+          return llamaResponse;
+        }
+      }
+
+      // Step 7: Final fallback
+      return response; // Return the fallback message
+    } catch (e) {
+      print('Error in optimized response generation: $e');
+      return await _generateFallbackResponse(userMessage);
+    }
+  }
+
+  /// Create enhanced prompt by combining user message with relevant capsule context
+  String _createEnhancedPrompt(String userMessage, CapsuleSearchResult capsuleResults) {
+    if (capsuleResults.results.isEmpty) {
+      return userMessage;
+    }
+
+    // Extract top relevant information
+    final relevantInfo = <String>[];
+    for (final result in capsuleResults.results) {
+      if (result.similarity > 0.3 && relevantInfo.length < 3) {
+        relevantInfo.add(result.content);
       }
     }
+
+    if (relevantInfo.isEmpty) {
+      return userMessage;
+    }
+
+    // Create enhanced prompt using emergency format
+    return '''
+Context from local knowledge base:
+${relevantInfo.join('\n\n')}
+
+User Question: $userMessage
+
+Please provide a helpful response based on the context above and your knowledge. Format your response using the emergency response format with <response>, <summary>, <detailed_answer>, and <additional_info> tags.
+''';
   }
 
-  // Add emergency context to prompts for AI models
-  String _addEmergencyContext(String userMessage) {
-    return '''You are NaseerAI, an emergency assistance AI designed for Gaza crisis support. You must provide:
+  /// Load model once and keep it loaded for better performance
+  Future<void> _loadAndPersistModel() async {
+    try {
+      if (_modelPersistentlyLoaded) return;
 
-1. IMMEDIATE, actionable solutions using available materials
-2. Offline-first guidance (no internet required)
-3. Clear, stress-appropriate language
-4. Life safety prioritization
+      print('🔄 Loading model for persistent use...');
+      
+      // Get available models
+      final availableModels = await _getAvailableModelsWithCorrectPath();
+      
+      if (availableModels.isEmpty) {
+        // Try to copy model from host system
+        final copySuccess = await _copyModelFromHost();
+        if (copySuccess) {
+          final availableModelsAfterCopy = await _getAvailableModelsWithCorrectPath();
+          if (availableModelsAfterCopy.isNotEmpty) {
+            availableModels.addAll(availableModelsAfterCopy);
+          }
+        }
+      }
 
-Context: User is in emergency/crisis situation with limited resources.
+      if (availableModels.isNotEmpty) {
+        // Load the first available model with timeout
+        final modelPath = availableModels.first;
+        _loadedModelPath = modelPath;
+        
+        final loadSuccess = await _nativeModelService.loadModel(modelPath).timeout(
+          _modelLoadTimeout,
+          onTimeout: () {
+            print('Model loading timed out after ${_modelLoadTimeout.inSeconds} seconds');
+            return false;
+          },
+        );
 
-User message: $userMessage
+        if (loadSuccess) {
+          _modelPersistentlyLoaded = true;
+          _isModelLoaded = true;
+          _useNativeModel = true;
+          _currentModel = _nativeModelService.activeModel;
+          print('✅ Model loaded and ready for persistent use');
+        }
+      }
+    } catch (e) {
+      print('Error loading persistent model: $e');
+      _modelPersistentlyLoaded = false;
+    }
+  }
 
-Response format:
+  /// Generate fallback response when model is not available
+  Future<String> _generateFallbackResponse(String userMessage) async {
+    try {
+      // Search capsules for relevant knowledge
+      final capsuleResults = await _capsuleSearchService.search(userMessage);
+      
+      if (capsuleResults.hasResults && _hasRelevantResults(capsuleResults)) {
+        // Use capsule knowledge for response
+        return await _addEmergencyContextWithCapsules(userMessage, capsuleResults);
+      }
+
+      // Use intelligent pattern-based responses from native model service
+      return await _nativeModelService.generateResponse(userMessage);
+    } catch (e) {
+      print('Error in fallback response: $e');
+      return "I'm ready to help with your question. Let me use my local AI knowledge to provide you with the best answer I can.";
+    }
+  }
+
+  /// Stream response by breaking it into chunks for better UX (ANR-safe)
+  Future<void> _streamResponse(String sessionId, String messageId, String fullResponse) async {
+    try {
+      final session = _sessions[sessionId];
+      if (session == null) return;
+
+      // Use microtask to prevent blocking UI thread
+      await Future.microtask(() async {
+        // Break response into words for streaming effect
+        final words = fullResponse.split(' ');
+        String currentContent = '';
+        
+        // Process in smaller batches to prevent ANR
+        const batchSize = 5; // Process 5 words at a time
+        
+        for (int i = 0; i < words.length; i += batchSize) {
+          // Check if streaming was cancelled
+          if (_streamingCancellation[sessionId] == true) {
+            return;
+          }
+
+          // Process batch of words
+          final endIndex = (i + batchSize > words.length) ? words.length : i + batchSize;
+          for (int j = i; j < endIndex; j++) {
+            currentContent += words[j];
+            if (j < words.length - 1) currentContent += ' ';
+          }
+
+          // Update message with current content
+          final updatedMessage = ChatMessage(
+            id: messageId,
+            content: currentContent,
+            type: MessageType.assistant,
+            timestamp: DateTime.now(),
+            status: endIndex == words.length ? MessageStatus.completed : MessageStatus.streaming,
+          );
+
+          _sessions[sessionId] = session.updateMessage(messageId, updatedMessage);
+          _streamControllers[sessionId]?.add(updatedMessage);
+
+          // Small delay between batches to allow UI updates
+          if (endIndex < words.length) {
+            await Future.delayed(const Duration(milliseconds: 100));
+          }
+        }
+      });
+    } catch (e) {
+      print('Error streaming response: $e');
+    }
+  }
+
+  /// Dispose method to clean up resources
+  void dispose() {
+    // Unload model to free memory
+    if (_modelPersistentlyLoaded) {
+      _nativeModelService.unloadModel();
+      _modelPersistentlyLoaded = false;
+    }
+    
+    // Close all stream controllers
+    for (final controller in _streamControllers.values) {
+      controller.close();
+    }
+    _streamControllers.clear();
+    _sessions.clear();
+  }
+
+  // Helper methods
+  String _generateSessionId() {
+    return 'session_${DateTime.now().millisecondsSinceEpoch}_${Random().nextInt(1000)}';
+  }
+
+  String _generateMessageId() {
+    return 'msg_${DateTime.now().millisecondsSinceEpoch}_${Random().nextInt(1000)}';
+  }
+
+  // Check if capsule search results are relevant enough
+  bool _hasRelevantResults(CapsuleSearchResult capsuleResults) {
+    if (capsuleResults.results.isEmpty) return false;
+    
+    // Check if any result has a good similarity score
+    for (final result in capsuleResults.results) {
+      if (result.similarity > 0.3) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /// Generate emergency response using capsule knowledge
+  Future<String> _addEmergencyContextWithCapsules(String userMessage, CapsuleSearchResult capsuleResults) async {
+    try {
+      if (capsuleResults.results.isEmpty) {
+        return "I don't have specific information about that in my local knowledge base.";
+      }
+
+      // Extract relevant context from search results
+      final relevantInfo = <String>[];
+      for (final result in capsuleResults.results) {
+        if (result.similarity > 0.2) { // Lower threshold for emergency context
+          relevantInfo.add(result.content);
+        }
+      }
+
+      if (relevantInfo.isEmpty) {
+        return "I found some information in my knowledge base but it doesn't seem directly relevant to your question.";
+      }
+
+      // Create emergency-focused response using CLAUDE.md format
+      final contextualInfo = relevantInfo.take(3).join('\n\n'); // Top 3 results
+      
+      return '''
 <response>
-<summary>One-sentence actionable summary</summary>
-<detailed_answer>Step-by-step solution with available materials</detailed_answer>
-<additional_info>Critical related emergency information</additional_info>
-</response>''';
+<summary>Emergency information from local knowledge base</summary>
+<detailed_answer>
+Based on your question about "${userMessage}", here's relevant information from my offline knowledge:
+
+${contextualInfo}
+
+This information is stored locally and doesn't require internet access.
+</detailed_answer>
+<additional_info>
+This response was generated using pre-loaded emergency data capsules designed for offline use during crisis situations.
+</additional_info>
+</response>
+      '''.trim();
+    } catch (e) {
+      print('Error generating capsule-based response: $e');
+      return "I encountered an error accessing my local knowledge base. Please try rephrasing your question.";
+    }
   }
 
-  // Get fallback response when AI model is not available
-  String _getFallbackResponse(String input) {
-    final lowerInput = input.toLowerCase();
-    
-    if (lowerInput.contains('water') && (lowerInput.contains('clean') || lowerInput.contains('purify'))) {
-      return '''Natural water purification methods include:
-
-• **Solar disinfection (SODIS)**: Clear plastic bottles filled with water exposed to sunlight for 6+ hours can kill bacteria and viruses through UV radiation.
-
-• **Sand filtration**: Multiple layers of fine sand, gravel, and charcoal can filter out particles and some contaminants.
-
-• **Boiling**: Using wood, solar cookers, or any heat source to boil water for 1-3 minutes kills most pathogens.
-
-• **Clay pot filters**: Ceramic filters made from clay and organic materials can remove bacteria and particles.
-
-• **For saltwater**: Solar stills using clear plastic over a container can collect evaporated freshwater through condensation.
-
-• **Plant-based**: Moringa seeds, banana peels, or sand/gravel combinations can help clarify muddy water.
-
-These methods use readily available natural elements like sunlight, sand, plants, and heat sources.''';
-    }
-
-    if (lowerInput.contains('hello') || lowerInput.contains('hi')) {
-      return "Hello! I'm NaseerAI, your offline AI assistant. I can help you with questions about water purification, renewable energy, science, technology, and much more. What would you like to know?";
-    }
-
-    if (lowerInput.contains('renewable') || lowerInput.contains('energy')) {
-      return '''Renewable energy harnesses natural, replenishing resources:
-
-**Solar Energy:**
-• Photovoltaic cells convert sunlight directly to electricity
-• Solar thermal systems heat water or generate steam
-• Concentrated solar power uses mirrors to focus heat
-
-**Wind Energy:**
-• Wind turbines capture kinetic energy from air movement
-• Works best in areas with consistent 15+ mph winds
-
-**Hydroelectric:**
-• Uses flowing or falling water to spin turbines
-• Most established renewable technology
-
-**Geothermal:**
-• Taps earth's internal heat for electricity or heating
-• Provides consistent baseload power
-
-These sources are sustainable because they naturally replenish faster than we consume them.''';
-    }
-
-    // Handle specific AI/technology questions
-    if (lowerInput.contains('artificial intelligence') || lowerInput.contains('ai') || lowerInput.contains('machine learning')) {
-      return '''**Artificial Intelligence (AI)** is the simulation of human intelligence in machines that are programmed to think, learn, and problem-solve like humans.
-
-**Key Components:**
-• **Machine Learning**: Systems that improve through experience and data
-• **Natural Language Processing**: Understanding and generating human language  
-• **Computer Vision**: Interpreting visual information
-• **Reasoning**: Drawing conclusions from available information
-
-**Types of AI:**
-• **Narrow AI**: Specialized for specific tasks (like voice assistants, image recognition)
-• **General AI**: Human-level intelligence across all domains (theoretical)
-• **Superintelligence**: Beyond human cognitive abilities (hypothetical)
-
-**Applications:**
-• Medical diagnosis and drug discovery
-• Autonomous vehicles and transportation
-• Language translation and communication
-• Scientific research and data analysis
-• Resource optimization and conservation
-
-AI systems learn from patterns in data to make predictions and decisions, helping solve complex problems more efficiently than traditional computing methods.''';
-    }
-
-    // Enhanced fallback with emergency awareness
-    String inputLower = input.toLowerCase();
-    
-    // Check for emergency context first
-    if (inputLower.contains('emergency') || inputLower.contains('help') || inputLower.contains('urgent')) {
-      return '''I understand you need assistance. While I'm running in offline mode, I can still provide guidance on:
-
-• **Emergency safety protocols** - immediate danger response
-• **Medical first aid** - injury treatment with available materials  
-• **Resource management** - water purification, power conservation
-• **Communication methods** - signaling for help without internet
-
-What specific situation do you need help with? Please describe your immediate concern.''';
-    }
-    
-    // Contextual suggestions based on input analysis
-    if (inputLower.contains('water') || inputLower.contains('thirsty') || inputLower.contains('drink')) {
-      return "I can help with water purification using natural methods. Ask me about solar disinfection, sand filtration, or emergency water collection techniques.";
-    }
-    
-    if (inputLower.contains('power') || inputLower.contains('battery') || inputLower.contains('energy')) {
-      return "I can guide you on battery conservation, alternative charging methods, and energy management strategies for emergency situations.";
-    }
-    
-    if (inputLower.contains('safe') || inputLower.contains('protect') || inputLower.contains('danger')) {
-      return "I can provide safety protocols for various emergency situations. Please describe what type of danger or safety concern you're facing.";
-    }
-    
-    return "I can provide practical, offline solutions for emergency situations, resource management, and survival techniques. What specific challenge are you facing or what would you like to learn about?";
+  Future<List<String>> _getAvailableModelsWithCorrectPath() async {
+    return await _nativeModelService.getAvailableModelFiles();
   }
 
-  // Get suggested questions based on conversation context
-  List<String> getSuggestions(String sessionId) {
-    final session = _sessions[sessionId];
-    if (session == null) return _getDefaultSuggestions();
-
-    // Analyze recent messages to provide contextual suggestions
-    final recentMessages = session.messages.take(5).toList();
-    final hasWaterTopic = recentMessages.any((msg) => 
-      msg.content.toLowerCase().contains('water'));
-    final hasEnergyTopic = recentMessages.any((msg) => 
-      msg.content.toLowerCase().contains('energy'));
-
-    if (hasWaterTopic) {
-      return [
-        "How does solar disinfection work?",
-        "What materials are needed for sand filtration?",
-        "Tell me about plant-based water filters",
-        "How to make a solar still?",
-      ];
-    }
-
-    if (hasEnergyTopic) {
-      return [
-        "How do solar panels work?",
-        "What is wind energy efficiency?",
-        "Explain geothermal energy",
-        "Benefits of hydroelectric power",
-      ];
-    }
-
-    return _getDefaultSuggestions();
-  }
-
-  List<String> _getDefaultSuggestions() {
-    return [
-      "How to purify water without electricity?",
-      "Emergency first aid for bleeding wounds",
-      "Battery conservation during power outages",
-      "Safe shelter during bombing attacks",
-      "Food preservation without refrigeration",
-      "Signal for help without internet",
-      "Treat injuries with household items",
-      "Stay warm without heating systems",
-    ];
+  Future<bool> _copyModelFromHost() async {
+    // Simple placeholder - in real implementation this would copy models
+    return false;
   }
 
   // Delete a session
   void deleteSession(String sessionId) {
     _sessions.remove(sessionId);
-    _streamControllers[sessionId]?.close();
-    _streamControllers.remove(sessionId);
-    // Session deleted successfully
+    final controller = _streamControllers.remove(sessionId);
+    controller?.close();
+    _streamingCancellation.remove(sessionId);
   }
 
-  // Clear all sessions
-  void clearAllSessions() {
-    for (final controller in _streamControllers.values) {
-      controller.close();
-    }
-    _sessions.clear();
-    _streamControllers.clear();
-    // All sessions cleared successfully
-  }
-
-  // Generate unique session ID
-  String _generateSessionId() {
-    return 'session_${DateTime.now().millisecondsSinceEpoch}_${Random().nextInt(9999)}';
-  }
-
-  // Generate unique message ID
-  String _generateMessageId() {
-    return 'msg_${DateTime.now().millisecondsSinceEpoch}_${Random().nextInt(9999)}';
-  }
-
-  // Dispose resources
-  void dispose() {
-    for (final controller in _streamControllers.values) {
-      controller.close();
-    }
-    _streamControllers.clear();
-    _sessions.clear();
+  // Get suggestions for the user
+  List<String> getSuggestions(String sessionId) {
+    return [
+      "What can you help me with?",
+      "Tell me about emergency procedures",
+      "How can I conserve resources?",
+      "What should I do in an emergency?",
+    ];
   }
 }
+

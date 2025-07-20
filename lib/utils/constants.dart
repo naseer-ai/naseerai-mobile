@@ -1,22 +1,23 @@
 class AppConstants {
   static const String appName = 'NaseerAI';
   static const String appVersion = '1.0.0';
-  static const String appDescription = 'Local AI Model Runner for Mobile';
+  static const String appDescription =
+      'Qwen2 1.5B Instruct Mobile AI Assistant - Local inference on Android';
 
-  static const String defaultModelPath = 'assets/models/phi2_demo_placeholder.tflite';
-  static const String modelsDirectory = 'assets/models/';
-  
+  static const String defaultModelPath = 'model_files/qwen2-1_5b-instruct-q4_k_m.gguf';
+  static const String modelsDirectory = 'model_files/';
+
   static const int maxInputLength = 512;
   static const double defaultConfidenceThreshold = 0.5;
   static const int defaultThreadCount = 4;
-  
+
   static const Duration inferenceTimeout = Duration(seconds: 30);
   static const Duration modelLoadTimeout = Duration(seconds: 60);
 
   static const Map<String, String> supportedModelFormats = {
-    '.tflite': 'TensorFlow Lite',
-    '.onnx': 'ONNX (Future Support)',
+    '.gguf': 'GGUF (llama.cpp)',
     '.bin': 'Custom Binary Format',
+    '.safetensors': 'SafeTensors Format',
   };
 
   static const List<String> supportedInputTypes = [
@@ -37,12 +38,16 @@ class AppConstants {
     },
     'confidence_threshold': 0.5,
     'max_new_tokens': 256,
-    'model_type': 'phi-2',
+    'model_type': 'qwen2-1.5b-instruct',
+    'model_size': '1.5B parameters',
+    'quantization': 'Q4_K_M',
+    'architecture': 'transformer',
+    'context_length': 2048,
     'labels': <String>[],
   };
 
   static const List<String> preloadedModels = [
-    'assets/models/phi2_demo_placeholder.tflite',
+    'model_files/qwen2-1_5b-instruct-q4_k_m.gguf',
   ];
 
   static const String githubRepository = 'https://github.com/your-org/naseerai';

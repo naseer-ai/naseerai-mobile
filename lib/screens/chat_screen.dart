@@ -19,12 +19,13 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
   final ChatService _chatService = ChatService();
   final ScrollController _scrollController = ScrollController();
   final TextEditingController _inputController = TextEditingController();
-  
+
   String? _sessionId;
   List<ChatMessage> _messages = [];
   List<String> _suggestions = [];
   bool _isLoading = false;
   bool _isTyping = false;
+  bool _suggestionsHidden = false;
   StreamSubscription<ChatMessage>? _messageSubscription;
 
   @override
@@ -41,21 +42,19 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
     try {
       // Initialize chat service
       await _chatService.initialize();
-      
+
       // Create new session
       _sessionId = _chatService.createSession();
-      
+
       // Listen to message stream
-      _messageSubscription = _chatService
-          .getMessageStream(_sessionId!)
-          .listen(_onNewMessage);
-      
+      _messageSubscription =
+          _chatService.getMessageStream(_sessionId!).listen(_onNewMessage);
+
       // Get initial suggestions
       _suggestions = _chatService.getSuggestions(_sessionId!);
-      
+
       // Add welcome message
       await _sendWelcomeMessage();
-      
     } catch (e) {
       _showErrorSnackBar('Failed to initialize chat: $e');
     } finally {
@@ -68,7 +67,8 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
   Future<void> _sendWelcomeMessage() async {
     final welcomeMessage = ChatMessage(
       id: 'welcome_${DateTime.now().millisecondsSinceEpoch}',
-      content: 'Hello! I\'m NaseerAI, your offline AI assistant. I can help you with questions about water purification, renewable energy, science, technology, and much more. What would you like to know?',
+      content:
+          'Hello! I\'m NaseerAI, your offline AI assistant. I can help you with questions about water purification, renewable energy, science, technology, and much more. What would you like to know?',
       type: MessageType.system,
       timestamp: DateTime.now(),
       status: MessageStatus.completed,
@@ -91,7 +91,7 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
 
       // Update typing state
       _isTyping = _messages.any((msg) => msg.isStreaming);
-      
+
       // Update suggestions after assistant response
       if (message.isAssistant && message.isCompleted) {
         _suggestions = _chatService.getSuggestions(_sessionId!);
@@ -108,18 +108,37 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
     try {
       // Clear input
       _inputController.clear();
-      
+
       // Send message through chat service
       await _chatService.sendMessage(_sessionId!, content.trim());
-      
+
       // Update suggestions
       setState(() {
         _suggestions = _chatService.getSuggestions(_sessionId!);
+        _suggestionsHidden =
+            false; // Show suggestions again after sending a message
       });
-      
     } catch (e) {
       _showErrorSnackBar('Failed to send message: $e');
     }
+  }
+
+  void _stopStreaming() {
+    if (_sessionId != null) {
+      _chatService.stopStreaming(_sessionId!);
+    }
+  }
+
+  void _hideSuggestions() {
+    setState(() {
+      _suggestionsHidden = true;
+    });
+  }
+
+  void _showSuggestions() {
+    setState(() {
+      _suggestionsHidden = false;
+    });
   }
 
   void _scrollToBottom() {
@@ -266,19 +285,28 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
                     },
                   ),
                 ),
-                
+
                 // Suggestions
-                if (_suggestions.isNotEmpty && !_isTyping)
+                if (_suggestions.isNotEmpty &&
+                    !_isTyping &&
+                    !_suggestionsHidden)
                   SuggestionsWidget(
                     suggestions: _suggestions,
                     onSuggestionTapped: _sendMessage,
+                    onClose: _hideSuggestions,
                   ),
-                
+
                 // Input area
                 ChatInputWidget(
                   controller: _inputController,
                   onSend: _sendMessage,
+                  onStop: _stopStreaming,
+                  onShowSuggestions: _showSuggestions,
                   enabled: !_isTyping,
+                  isStreaming: _isTyping,
+                  showSuggestionsButton: _suggestions.isNotEmpty &&
+                      _suggestionsHidden &&
+                      !_isTyping,
                 ),
               ],
             ),
@@ -302,13 +330,15 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
                 ),
                 const SizedBox(width: 8),
                 Text(
-                  _chatService.isModelLoaded ? 'Model Loaded' : 'Model Not Loaded',
+                  _chatService.isModelLoaded
+                      ? 'Model Loaded'
+                      : 'Model Not Loaded',
                   style: const TextStyle(fontWeight: FontWeight.bold),
                 ),
               ],
             ),
             const SizedBox(height: 12),
-            const Text('Model: Phi-2 (Offline)'),
+            const Text('Model: Qwen2 1.5B Instruct (Offline)'),
             const SizedBox(height: 8),
             Text('Session: ${_sessionId?.substring(0, 12)}...'),
             const SizedBox(height: 8),
@@ -334,7 +364,7 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
         applicationIcon: const Icon(Icons.chat, size: 48),
         children: const [
           Text(
-            'An offline AI chatbot powered by Phi-2 model. '
+            'An offline AI chatbot powered by Qwen2 1.5B Instruct model. '
             'No internet connection required - all processing happens on your device.',
           ),
           SizedBox(height: 16),
@@ -356,12 +386,12 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
     _messageSubscription?.cancel();
     _scrollController.dispose();
     _inputController.dispose();
-    
+
     // Clean up session
     if (_sessionId != null) {
       _chatService.deleteSession(_sessionId!);
     }
-    
+
     super.dispose();
   }
 }

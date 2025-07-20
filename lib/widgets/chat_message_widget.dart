@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../models/chat_message.dart';
+import '../utils/response_parser.dart';
 
 class ChatMessageWidget extends StatelessWidget {
   final ChatMessage message;
@@ -56,14 +57,7 @@ class ChatMessageWidget extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   // Message content
-                  SelectableText(
-                    message.content,
-                    style: TextStyle(
-                      color: _getTextColor(isUser, isSystem),
-                      fontSize: 16,
-                      height: 1.4,
-                    ),
-                  ),
+                  _buildMessageContent(),
                   
                   // Streaming indicator
                   if (message.isStreaming)
@@ -78,7 +72,7 @@ class ChatMessageWidget extends StatelessWidget {
                             child: CircularProgressIndicator(
                               strokeWidth: 2,
                               valueColor: AlwaysStoppedAnimation<Color>(
-                                _getTextColor(isUser, isSystem).withOpacity(0.7),
+                                _getTextColor(isUser, isSystem).withValues(alpha: 0.7),
                               ),
                             ),
                           ),
@@ -86,7 +80,7 @@ class ChatMessageWidget extends StatelessWidget {
                           Text(
                             'Typing...',
                             style: TextStyle(
-                              color: _getTextColor(isUser, isSystem).withOpacity(0.7),
+                              color: _getTextColor(isUser, isSystem).withValues(alpha: 0.7),
                               fontSize: 12,
                               fontStyle: FontStyle.italic,
                             ),
@@ -133,7 +127,7 @@ class ChatMessageWidget extends StatelessWidget {
                 Text(
                   _formatTime(message.timestamp),
                   style: theme.textTheme.bodySmall?.copyWith(
-                    color: theme.textTheme.bodySmall?.color?.withOpacity(0.6),
+                    color: theme.textTheme.bodySmall?.color?.withValues(alpha: 0.6),
                   ),
                 ),
                 
@@ -146,7 +140,7 @@ class ChatMessageWidget extends StatelessWidget {
                       child: Icon(
                         Icons.copy,
                         size: 16,
-                        color: theme.textTheme.bodySmall?.color?.withOpacity(0.6),
+                        color: theme.textTheme.bodySmall?.color?.withValues(alpha: 0.6),
                       ),
                     ),
                   ),
@@ -169,6 +163,158 @@ class ChatMessageWidget extends StatelessWidget {
     );
   }
 
+  Widget _buildMessageContent() {
+    final isUser = message.isUser;
+    final isSystem = message.isSystem;
+    
+    if (message.isAssistant) {
+      final parsed = ResponseParser.parse(message.content);
+      
+      if (parsed.isStructured) {
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Summary section
+            if (parsed.summary != null) ...[
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.blue.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.blue.withValues(alpha: 0.3)),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Icon(
+                          Icons.lightbulb_outline,
+                          size: 16,
+                          color: Colors.blue[700],
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          'Quick Summary',
+                          style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            color: Colors.blue[700],
+                            fontSize: 14,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    SelectableText(
+                      parsed.summary!,
+                      style: TextStyle(
+                        color: _getTextColor(isUser, isSystem),
+                        fontSize: 15,
+                        height: 1.4,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 12),
+            ],
+
+            // Detailed answer section
+            if (parsed.detailedAnswer != null) ...[
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Icon(
+                        Icons.info_outline,
+                        size: 16,
+                        color: Colors.green[700],
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        'Detailed Instructions',
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          color: Colors.green[700],
+                          fontSize: 14,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  SelectableText(
+                    parsed.detailedAnswer!,
+                    style: TextStyle(
+                      color: _getTextColor(isUser, isSystem),
+                      fontSize: 15,
+                      height: 1.4,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+            ],
+
+            // Additional info section
+            if (parsed.additionalInfo != null) ...[
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.orange.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.orange.withValues(alpha: 0.3)),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Icon(
+                          Icons.bookmark_outline,
+                          size: 16,
+                          color: Colors.orange[700],
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          'Additional Information',
+                          style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            color: Colors.orange[700],
+                            fontSize: 14,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    SelectableText(
+                      parsed.additionalInfo!,
+                      style: TextStyle(
+                        color: _getTextColor(isUser, isSystem),
+                        fontSize: 15,
+                        height: 1.4,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ],
+        );
+      }
+    }
+    
+    // Default message display for non-structured content
+    return SelectableText(
+      message.content,
+      style: TextStyle(
+        color: _getTextColor(isUser, isSystem),
+        fontSize: 16,
+        height: 1.4,
+      ),
+    );
+  }
+
   Color _getMessageColor(ThemeData theme, bool isUser, bool isSystem) {
     if (isSystem) {
       return theme.colorScheme.secondaryContainer;
@@ -176,7 +322,7 @@ class ChatMessageWidget extends StatelessWidget {
     if (isUser) {
       return theme.colorScheme.primary;
     }
-    return theme.colorScheme.surfaceVariant;
+    return theme.colorScheme.surfaceContainerHighest;
   }
 
   Color _getTextColor(bool isUser, bool isSystem) {

@@ -5,6 +5,10 @@
 #include <vector>
 #include <memory>
 
+// Forward declarations for llama.cpp types
+struct llama_context;
+typedef int32_t llama_token;
+
 class TextGenerator {
 public:
     TextGenerator();
@@ -28,8 +32,11 @@ private:
     float m_top_p = 0.95f;
     
     std::string generate_pattern_response(const std::string& prompt);
+    std::string generate_with_llama(const std::string& prompt, int max_tokens);
+    llama_token sample_token(llama_context* ctx);
     std::vector<std::string> tokenize(const std::string& text);
     std::string detokenize(const std::vector<int>& tokens);
+    std::string handle_basic_math(const std::string& expression);
 };
 
 #endif // TEXT_GENERATOR_H

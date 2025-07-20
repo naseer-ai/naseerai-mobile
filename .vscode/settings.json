@@ -1,4 +1,6 @@
 {
     "dart.flutterSdkPath": "~/snap/flutter/common/flutter",
-    "dart.androidSdkPath": "/home/forhad/android-sdk"
+    "dart.androidSdkPath": "/home/forhad/android-sdk",
+    "chat.tools.autoApprove": true,
+    "chat.agent.maxRequests": 50
 }

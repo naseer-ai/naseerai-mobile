@@ -11,10 +11,10 @@ dependencies:
     sdk: flutter
   cupertino_icons: ^1.0.2
   path_provider: ^2.0.15
-  flutter_isolate: ^2.0.4
-  tflite_flutter: ^0.11.0
-  camera: ^0.10.5+5
   ffi: ^2.1.0
+  http: ^1.1.0
+  path: ^1.8.3
+  permission_handler: ^11.0.1
 
 dev_dependencies:
   flutter_test:
@@ -24,12 +24,10 @@ dev_dependencies:
 flutter:
   uses-material-design: true
   assets:
-    - assets/models/
     - assets/images/
+    - capsules/
 
 # Development Commands (run from project root)
-# make linux    - Run on Linux Desktop with optimized input
 # make android  - Run on Android emulator/device with auto-detection
 # make start    - Smart launcher with interactive platform selection
-# make web      - Run on Web browser
 # make auto     - Auto-detect best platform and launch

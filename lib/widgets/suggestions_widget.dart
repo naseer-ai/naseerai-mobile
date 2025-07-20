@@ -3,11 +3,13 @@ import 'package:flutter/material.dart';
 class SuggestionsWidget extends StatelessWidget {
   final List<String> suggestions;
   final Function(String) onSuggestionTapped;
+  final VoidCallback? onClose;
 
   const SuggestionsWidget({
     super.key,
     required this.suggestions,
     required this.onSuggestionTapped,
+    this.onClose,
   });
 
   @override
@@ -30,27 +32,49 @@ class SuggestionsWidget extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Title
-          Padding(
-            padding: const EdgeInsets.only(bottom: 8),
-            child: Text(
-              'Suggested questions:',
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: theme.colorScheme.onSurface.withAlpha(179),
-                fontWeight: FontWeight.w500,
+          // Title with close button
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                'Suggested questions:',
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.onSurface.withAlpha(179),
+                  fontWeight: FontWeight.w500,
+                ),
               ),
-            ),
+              if (onClose != null)
+                Material(
+                  color: Colors.transparent,
+                  child: InkWell(
+                    onTap: onClose,
+                    borderRadius: BorderRadius.circular(16),
+                    child: Padding(
+                      padding: const EdgeInsets.all(4),
+                      child: Icon(
+                        Icons.close,
+                        size: 16,
+                        color: theme.colorScheme.onSurface.withAlpha(128),
+                      ),
+                    ),
+                  ),
+                ),
+            ],
           ),
-          
+
+          const SizedBox(height: 8),
+
           // Suggestions chips
           Wrap(
             spacing: 8,
             runSpacing: 6,
-            children: suggestions.map((suggestion) => _buildSuggestionChip(
-              context,
-              suggestion,
-              () => onSuggestionTapped(suggestion),
-            )).toList(),
+            children: suggestions
+                .map((suggestion) => _buildSuggestionChip(
+                      context,
+                      suggestion,
+                      () => onSuggestionTapped(suggestion),
+                    ))
+                .toList(),
           ),
         ],
       ),
@@ -63,7 +87,7 @@ class SuggestionsWidget extends StatelessWidget {
     VoidCallback onTap,
   ) {
     final theme = Theme.of(context);
-    
+
     return Material(
       color: Colors.transparent,
       child: InkWell(
