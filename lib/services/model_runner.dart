@@ -149,18 +149,18 @@ class ModelRunner {
 
     // Basic response directing to capsules
     if (lowerInput.contains('hello') || lowerInput.contains('hi')) {
-      return "Hello! I'm NaseerAI. The Qwen2 model is having trouble generating responses. Please install knowledge capsules from the Capsules tab for better AI interactions.";
+      return "السلام عليكم ورحمة الله وبركاته\n\nWelcome! I'm NaseerAI, here to assist you with guidance and support. For comprehensive emergency knowledge and specialized information, please visit the Capsules section. How may I help you today?";
     }
 
     if (lowerInput.contains('emergency') || lowerInput.contains('urgent')) {
-      return "For true emergencies, please contact local emergency services immediately.";
+      return "بسم الله الرحمن الرحيم\n\nFor immediate medical emergencies, contact local emergency services. I'm here to provide guidance and support. Please check the Capsules section for detailed emergency protocols. May Allah keep you safe.";
     }
 
     return _generateFallbackResponse(input);
   }
 
   String _generateFallbackResponse(String input) {
-    return "I'm having trouble generating a proper response with the current Qwen2 model configuration. For better AI responses, please install knowledge capsules from the Capsules tab. Capsules contain specialized knowledge that can help me provide more accurate and helpful answers to your questions.";
+    return "السلام عليكم ورحمة الله وبركاته\n\nMay Allah's peace be upon you. I'm here to provide guidance and assistance. For comprehensive emergency support and specialized knowledge, please explore the Capsules section where additional resources are available.\n\nHow may I assist you today, بإذن الله?";
   }
 
   String _getModelIdFromPath(String modelPath) {

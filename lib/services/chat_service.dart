@@ -304,9 +304,14 @@ class ChatService {
         
         // If capsule response is substantial, use it
         if (capsuleResponse.length > 100 && !capsuleResponse.contains("I don't have specific information")) {
-          print('✅ Using capsule-based response');
+          print('✅ Using capsule-based response (${capsuleResponse.length} chars)');
           return capsuleResponse;
+        } else {
+          final previewLength = capsuleResponse.length > 100 ? 100 : capsuleResponse.length;
+          print('⚠️ Capsule response not substantial enough: ${capsuleResponse.substring(0, previewLength)}...');
         }
+      } else {
+        print('📊 Capsule results not highly relevant. HasResults: ${capsuleResults.hasResults}, HighlyRelevant: ${_hasHighlyRelevantResults(capsuleResults)}');
       }
       
       // Step 2: Ensure model is loaded and ready
@@ -329,7 +334,12 @@ class ChatService {
       if (response.isNotEmpty && 
           !response.contains('having trouble generating') && 
           !response.contains('install knowledge capsules') &&
-          !response.contains('For true emergencies, please contact local emergency services')) {
+          !response.contains('For true emergencies, please contact local emergency services') &&
+          !response.contains('السلام عليكم') && // Arabic greeting indicates fallback
+          !response.contains('بسم الله') && // Basmala indicates fallback
+          !response.contains('check the Capsules section') &&
+          !response.contains('visit the Capsules section') &&
+          !response.contains('explore the Capsules section')) {
         return response;
       }
 

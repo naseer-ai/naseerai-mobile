@@ -6,7 +6,6 @@ import 'model_manager.dart';
 /// Since TensorFlow Lite can't directly load GGUF, this service provides
 /// utilities for GGUF model information and potential conversion pathways
 class GgufModelService {
-
   /// Get available GGUF models
   static Future<List<String>> getAvailableGgufModels() async {
     // Use ModelManager for consistent model handling
@@ -102,7 +101,9 @@ class GgufModelService {
     }
 
     // Basic questions
-    if (lowerPrompt.contains('hello') || lowerPrompt.contains('hi ') || lowerPrompt.startsWith('hi')) {
+    if (lowerPrompt.contains('hello') ||
+        lowerPrompt.contains('hi ') ||
+        lowerPrompt.startsWith('hi')) {
       return "Hello! I'm NaseerAI, powered by $modelType. How can I help you today?";
     }
 
@@ -122,16 +123,17 @@ class GgufModelService {
 
     // Emergency/urgent questions
     if (lowerPrompt.contains('emergency') || lowerPrompt.contains('urgent')) {
-      return "For true emergencies, please contact local emergency services immediately. I'm here to help with information and guidance for non-emergency situations.";
+      return "بسم الله الرحمن الرحيم\n\nFor immediate medical emergencies, contact local emergency services. I'm here to provide guidance and support. Please also check the Capsules section for detailed emergency protocols and safety information. May Allah keep you safe.";
     }
 
     // Default response when model can't generate proper responses
-    return "I'm having trouble generating a detailed response with the current model configuration. The basic response system is working, but for better AI responses with full language understanding, please install knowledge capsules from the Capsules tab. What specific question can I help you with?";
+    return "الله أعلم\n\nMay Allah's peace and blessings be upon you. I'm here to assist you with guidance and information. For more comprehensive emergency support and specialized knowledge, please check the Capsules section where additional resources are available.\n\nHow may I help you today, إن شاء الله?";
   }
 
   static String _tryBasicMath(String prompt) {
     try {
-      final mathPattern = RegExp(r'(\d+(?:\.\d+)?)\s*([+\-*/])\s*(\d+(?:\.\d+)?)');
+      final mathPattern =
+          RegExp(r'(\d+(?:\.\d+)?)\s*([+\-*/])\s*(\d+(?:\.\d+)?)');
       final match = mathPattern.firstMatch(prompt);
 
       if (match != null) {

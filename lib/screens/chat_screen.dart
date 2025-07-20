@@ -68,7 +68,7 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
     final welcomeMessage = ChatMessage(
       id: 'welcome_${DateTime.now().millisecondsSinceEpoch}',
       content:
-          'Hello! I\'m NaseerAI, your offline AI assistant. I can help you with questions about water purification, renewable energy, science, technology, and much more. What would you like to know?',
+          'السلام عليكم ورحمة الله وبركاته\n\nWelcome! I\'m NaseerAI, your offline AI assistant, here to serve you بإذن الله. I can help you with questions about water purification, renewable energy, science, technology, emergency guidance, and much more.\n\nMay Allah bless your pursuit of knowledge. What would you like to know?',
       type: MessageType.system,
       timestamp: DateTime.now(),
       status: MessageStatus.completed,
