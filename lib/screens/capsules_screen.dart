@@ -46,6 +46,14 @@ class _CapsulesScreenState extends State<CapsulesScreen> {
       uid: 'N0r5Z8',
       topics: ['first aid', 'cuts', 'scrapes'],
     ),
+    const Capsule(
+      title: 'Sample Capsule',
+      shortDescription: 'Sample capsule with a news realted layoffs by Trump',
+      installLink:
+          'https://raw.githubusercontent.com/naseer-ai/naseerai-mobile/refs/heads/dev/sample_capsules/sample_embeddings.json',
+      uid: 'random123`',
+      topics: ['sample', 'news'],
+    ),
   ];
 
   final Map<String, bool> _installationStatus = {};
@@ -57,27 +65,44 @@ class _CapsulesScreenState extends State<CapsulesScreen> {
   }
 
   Future<void> _checkInstallationStatus() async {
-    for (final capsule in _capsules) {
-      final isInstalled = await _isCapsuleInstalled(capsule.uid);
-      setState(() {
-        _installationStatus[capsule.uid] = isInstalled;
-      });
-    }
+    // Check installation status efficiently without blocking UI
+    final results = await _checkAllCapsulesInstalled();
+    setState(() {
+      _installationStatus.addAll(results);
+    });
   }
 
-  Future<bool> _isCapsuleInstalled(String uid) async {
+  Future<Map<String, bool>> _checkAllCapsulesInstalled() async {
+    final results = <String, bool>{};
+
     try {
       final directory = Directory('/sdcard/naseerai/capsules');
       if (!await directory.exists()) {
-        return false;
+        // If directory doesn't exist, all capsules are not installed
+        for (final capsule in _capsules) {
+          results[capsule.uid] = false;
+        }
+        return results;
       }
 
+      // Get all files once instead of listing for each capsule
       final files = await directory.list().toList();
-      return files
-          .any((file) => file is File && file.path.contains('__${uid}__.json'));
+      final fileNames =
+          files.where((file) => file is File).map((file) => file.path).toSet();
+
+      // Check each capsule against the file list
+      for (final capsule in _capsules) {
+        results[capsule.uid] = fileNames
+            .any((fileName) => fileName.contains('__${capsule.uid}__.json'));
+      }
     } catch (e) {
-      return false;
+      // If any error occurs, assume all capsules are not installed
+      for (final capsule in _capsules) {
+        results[capsule.uid] = false;
+      }
     }
+
+    return results;
   }
 
   Future<void> _toggleInstall(Capsule capsule) async {

@@ -10,22 +10,14 @@ class TypingIndicator extends StatefulWidget {
 class _TypingIndicatorState extends State<TypingIndicator>
     with TickerProviderStateMixin {
   late AnimationController _animationController;
-  late Animation<double> _animation;
 
   @override
   void initState() {
     super.initState();
     _animationController = AnimationController(
-      duration: const Duration(milliseconds: 1500),
+      duration: const Duration(milliseconds: 1200),
       vsync: this,
     );
-    _animation = Tween<double>(
-      begin: 0.0,
-      end: 1.0,
-    ).animate(CurvedAnimation(
-      parent: _animationController,
-      curve: Curves.easeInOut,
-    ));
     _animationController.repeat();
   }
 
@@ -79,49 +71,28 @@ class _TypingIndicatorState extends State<TypingIndicator>
                 ),
               ],
             ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                // Typing text
-                Text(
-                  'AI is typing',
-                  style: theme.textTheme.bodyMedium?.copyWith(
-                    color: theme.colorScheme.onSurface.withAlpha(179),
-                    fontStyle: FontStyle.italic,
-                  ),
-                ),
-                
-                const SizedBox(width: 8),
-                
-                // Animated dots
-                AnimatedBuilder(
-                  animation: _animation,
-                  builder: (context, child) {
-                    return Row(
-                      children: List.generate(3, (index) {
-                        final delay = index * 0.2;
-                        final opacity = (_animation.value - delay).clamp(0.0, 1.0);
-                        final scale = (opacity * 2).clamp(0.0, 1.0);
-                        
-                        return Transform.scale(
-                          scale: scale,
-                          child: Container(
-                            margin: const EdgeInsets.symmetric(horizontal: 1),
-                            width: 6,
-                            height: 6,
-                            decoration: BoxDecoration(
-                              color: theme.colorScheme.primary.withAlpha(
-                                (opacity * 255).round(),
-                              ),
-                              shape: BoxShape.circle,
-                            ),
-                          ),
-                        );
-                      }),
+            child: AnimatedBuilder(
+              animation: _animationController,
+              builder: (context, child) {
+                return Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: List.generate(3, (index) {
+                    // Simple delayed animation for each dot
+                    final animationValue = (_animationController.value + (index * 0.33)) % 1.0;
+                    final opacity = (0.3 + (0.7 * (1.0 - (animationValue - 0.5).abs() * 2).clamp(0.0, 1.0)));
+                    
+                    return Container(
+                      margin: const EdgeInsets.symmetric(horizontal: 2),
+                      width: 8,
+                      height: 8,
+                      decoration: BoxDecoration(
+                        color: theme.colorScheme.primary.withAlpha((opacity * 255).round()),
+                        shape: BoxShape.circle,
+                      ),
                     );
-                  },
-                ),
-              ],
+                  }),
+                );
+              },
             ),
           ),
         ],

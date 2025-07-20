@@ -47,12 +47,12 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
     try {
       // Check if model is available first
       final isModelAvailable = await ModelManager.instance.isChatModelAvailable;
-      
+
       if (!isModelAvailable) {
         setState(() {
           _isLoading = false;
         });
-        
+
         // Show model install dialog
         final shouldInstall = await _showModelInstallDialog();
         if (!shouldInstall) {
@@ -60,14 +60,14 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
           _showErrorSnackBar('AI model is required to start chatting');
           return;
         }
-        
+
         // Check again after potential installation
         final isNowAvailable = await ModelManager.instance.isChatModelAvailable;
         if (!isNowAvailable) {
           _showErrorSnackBar('Model installation failed or was cancelled');
           return;
         }
-        
+
         setState(() {
           _isLoading = true;
         });
@@ -125,8 +125,9 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
         _messages.add(message);
       }
 
-      // Update typing state
-      _isTyping = _messages.any((msg) => msg.isStreaming);
+      // Update typing state - only show typing indicator during actual streaming with content
+      _isTyping = _messages.any((msg) =>
+          msg.isStreaming && msg.isAssistant && msg.content.trim().isNotEmpty);
 
       // Update suggestions after assistant response
       if (message.isAssistant && message.isCompleted) {

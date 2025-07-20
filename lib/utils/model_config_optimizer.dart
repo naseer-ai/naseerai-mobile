@@ -47,12 +47,12 @@ class ModelConfigOptimizer {
   }
 
   static ModelConfig _generateConfig(int availableMemoryMB, ModelSizeCategory modelSize) {
-    // Base configuration
-    ModelConfig config = ModelConfig(
+    // Base configuration optimized for quality and reduced repetition
+    ModelConfig config = const ModelConfig(
       maxTokens: 256,
-      temperature: 0.7,
-      topK: 40,
-      topP: 0.9,
+      temperature: 0.8, // Higher temperature for more varied responses
+      topK: 50,         // Increased for more vocabulary diversity
+      topP: 0.95,       // Higher for better coherence
       contextLength: 2048,
       batchSize: 1,
       numThreads: 4,
@@ -65,7 +65,8 @@ class ModelConfigOptimizer {
         maxTokens: 64,
         contextLength: 512,
         numThreads: 2,
-        temperature: 0.8, // Higher temp for faster inference
+        temperature: 0.9, // Higher temp for variety and faster inference
+        topK: 40,         // Reduced for faster processing
       );
     } else if (availableMemoryMB < 2048) {
       // Low memory devices
@@ -73,13 +74,15 @@ class ModelConfigOptimizer {
         maxTokens: 128,
         contextLength: 1024,
         numThreads: 3,
+        temperature: 0.85, // Slightly higher for better variety
       );
     } else if (availableMemoryMB < 3072) {
-      // Medium memory devices
+      // Medium memory devices  
       config = config.copyWith(
         maxTokens: 256,
         contextLength: 2048,
         numThreads: 4,
+        temperature: 0.8, // Optimal balance
       );
     } else {
       // High memory devices
@@ -87,6 +90,8 @@ class ModelConfigOptimizer {
         maxTokens: 512,
         contextLength: 4096,
         numThreads: 6,
+        temperature: 0.75, // Lower for more precise responses
+        topK: 60,          // Higher diversity
       );
     }
 
@@ -135,11 +140,13 @@ class ModelConfigOptimizer {
       final availableMemory = deviceInfo['availableMemoryMB'] ?? 0;
       final totalMemory = deviceInfo['totalMemoryMB'] ?? 0;
       
-      // Estimate model memory requirements (rough calculation)
+      // Estimate model memory requirements (realistic calculation)
       final modelSize = await _estimateModelMemoryRequirement(modelPath);
-      final systemReserved = (totalMemory * 0.3).round(); // 30% for system
+      final systemReserved = (totalMemory * 0.2).round(); // 20% for system (less conservative)
       
-      return (availableMemory - systemReserved) > modelSize;
+      // Allow loading if we have at least the model size + minimal overhead
+      final minimumRequired = modelSize + 100; // Just 100MB buffer
+      return (availableMemory - systemReserved) > minimumRequired;
     } catch (e) {
       return false; // Conservative: assume not safe if we can't determine
     }
@@ -149,20 +156,20 @@ class ModelConfigOptimizer {
     try {
       final fileName = modelPath.split('/').last.toLowerCase();
       
-      // Conservative estimates based on model names
+      // More realistic estimates based on actual model names and Q4_K_M quantization
       if (fileName.contains('tinyllama') || fileName.contains('1.1b')) {
-        return 800; // ~800MB for TinyLlama
+        return 700; // ~700MB for TinyLlama Q4_K_M (more realistic)
       } else if (fileName.contains('1.5b')) {
-        return 1200; // ~1.2GB for Qwen2-1.5B
+        return 1000; // ~1GB for Qwen2-1.5B Q4_K_M
       } else if (fileName.contains('3b')) {
-        return 2400; // ~2.4GB for 3B models
+        return 2000; // ~2GB for 3B models Q4_K_M
       } else if (fileName.contains('7b')) {
-        return 5600; // ~5.6GB for 7B models
+        return 4500; // ~4.5GB for 7B models Q4_K_M
       }
       
-      return 1000; // Default conservative estimate
+      return 800; // Default more realistic estimate
     } catch (e) {
-      return 1000;
+      return 800;
     }
   }
 }

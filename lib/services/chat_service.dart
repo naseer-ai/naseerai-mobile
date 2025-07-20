@@ -3,7 +3,6 @@ import 'dart:math';
 import '../models/chat_message.dart';
 import '../models/ai_model.dart';
 import '../models/search_result.dart';
-import 'model_runner.dart';
 import 'native_model_service.dart';
 import 'capsule_search_service.dart';
 
@@ -12,7 +11,6 @@ class ChatService {
   factory ChatService() => _instance;
   ChatService._internal();
 
-  final ModelRunner _modelRunner = ModelRunner();
   final NativeModelService _nativeModelService = NativeModelService.instance;
   final CapsuleSearchService _capsuleSearchService = CapsuleSearchService();
   final Map<String, ChatSession> _sessions = {};
@@ -25,7 +23,6 @@ class ChatService {
 
   // Performance optimization: Keep model loaded
   bool _modelPersistentlyLoaded = false;
-  String? _loadedModelPath;
 
   // Timeout configuration
   static const Duration _responseTimeout = Duration(seconds: 30);
@@ -232,14 +229,14 @@ class ChatService {
     if (session == null) return;
 
     try {
-      // Create initial AI message
+      // Create initial AI message with "sending" status during generation
       final aiMessageId = _generateMessageId();
       final initialAiMessage = ChatMessage(
         id: aiMessageId,
         content: '',
         type: MessageType.assistant,
         timestamp: DateTime.now(),
-        status: MessageStatus.streaming,
+        status: MessageStatus.sending, // Use sending status during generation
       );
 
       // Add to session and emit
@@ -341,8 +338,29 @@ class ChatService {
 
       // Step 4: Try to use the native model service with enhanced prompt
       print('🤖 Attempting response generation with native model service...');
-      final response =
+
+      String rawResponse =
           await _nativeModelService.generateResponse(enhancedPrompt);
+
+      // Check response quality and retry if needed
+      int qualityScore = _evaluateResponseQuality(rawResponse, userMessage);
+      int retryCount = 0;
+      const maxRetries = 2;
+
+      while (qualityScore < 50 && retryCount < maxRetries) {
+        print(
+            '🔄 Response quality low ($qualityScore%), retrying with different approach...');
+
+        // Try with a more focused prompt
+        final retryPrompt =
+            _createFocusedRetryPrompt(userMessage, capsuleResults);
+        rawResponse = await _nativeModelService.generateResponse(retryPrompt);
+        qualityScore = _evaluateResponseQuality(rawResponse, userMessage);
+        retryCount++;
+      }
+
+      // Post-process the response to improve quality
+      final response = _postProcessResponse(rawResponse, userMessage);
 
       // Check if we got a real response (not a fallback message)
       if (response.isNotEmpty &&
@@ -366,11 +384,13 @@ class ChatService {
             userMessage, capsuleResults);
       }
 
-      // Step 6: If we got a fallback, try direct llama service
+      // Step 6: If we got a fallback, try direct llama service with system prompt
       if (_isModelLoaded && _useNativeModel) {
         print('🦙 Trying direct LlamaService response generation...');
+        final systemPromptedMessage =
+            assistantSystemPrompt + '\n\nUser: $userMessage\n\nNaseerAI:';
         final llamaResponse = await _nativeModelService.llamaService
-            .generateResponse(enhancedPrompt);
+            .generateResponse(systemPromptedMessage);
         if (llamaResponse.isNotEmpty && !llamaResponse.contains('Error:')) {
           return llamaResponse;
         }
@@ -384,38 +404,73 @@ class ChatService {
     }
   }
 
-  /// Create enhanced prompt by combining user message with relevant capsule context
+  /// Create enhanced prompt with proper system context and length optimization
   String _createEnhancedPrompt(
       String userMessage, CapsuleSearchResult capsuleResults) {
-    if (capsuleResults.results.isEmpty) {
-      return userMessage;
+    // Start with optimized system prompt for small models
+    String fullPrompt = assistantSystemPrompt + '\n\n';
+
+    // Add capsule context if available - but keep it concise for small models
+    if (capsuleResults.results.isNotEmpty) {
+      final relevantInfo = <String>[];
+      int totalLength = 0;
+      const maxContextLength = 300; // Limit context for small models
+
+      for (final result in capsuleResults.results) {
+        if (result.similarity > 0.3 && relevantInfo.length < 2) {
+          // Max 2 results
+          final cleanedContent = _cleanTextContent(result.content);
+          if (cleanedContent.isNotEmpty &&
+              totalLength + cleanedContent.length < maxContextLength) {
+            // Truncate if too long
+            final truncatedContent = cleanedContent.length > 150
+                ? cleanedContent.substring(0, 150) + "..."
+                : cleanedContent;
+            relevantInfo.add(truncatedContent);
+            totalLength += truncatedContent.length;
+          }
+        }
+      }
+
+      if (relevantInfo.isNotEmpty) {
+        fullPrompt += 'CONTEXT: ';
+        fullPrompt += relevantInfo.join(' | ');
+        fullPrompt += '\n\n';
+      }
     }
 
-    // Extract top relevant information
-    final relevantInfo = <String>[];
-    for (final result in capsuleResults.results) {
-      if (result.similarity > 0.25 && relevantInfo.length < 3) {
-        // Reasonable threshold for prompt enhancement
-        final cleanedContent = _cleanTextContent(result.content);
-        if (cleanedContent.isNotEmpty) {
-          relevantInfo.add(cleanedContent);
+    // Add conversation history for context (last 2 messages max)
+    final session = _sessions.values.firstWhere(
+        (s) => s.messages.any((m) => m.content == userMessage),
+        orElse: () => ChatSession(
+            id: '',
+            createdAt: DateTime.now(),
+            lastActivity: DateTime.now(),
+            messages: []));
+
+    if (session.messages.length > 2) {
+      final recentMessages = session.messages.length > 4
+          ? session.messages.sublist(session.messages.length - 4)
+          : session.messages; // Last 2 exchanges
+      for (int i = 0; i < recentMessages.length - 1; i += 2) {
+        if (i + 1 < recentMessages.length) {
+          final userMsg = recentMessages[i];
+          final aiMsg = recentMessages[i + 1];
+          if (userMsg.type == MessageType.user &&
+              aiMsg.type == MessageType.assistant) {
+            fullPrompt +=
+                'User: ${userMsg.content.length > 100 ? userMsg.content.substring(0, 100) + "..." : userMsg.content}\n';
+            fullPrompt +=
+                'NaseerAI: ${aiMsg.content.length > 100 ? aiMsg.content.substring(0, 100) + "..." : aiMsg.content}\n\n';
+          }
         }
       }
     }
 
-    if (relevantInfo.isEmpty) {
-      return userMessage;
-    }
+    // Add current user message with clear formatting
+    fullPrompt += 'User: $userMessage\n\nNaseerAI: ';
 
-    // Create enhanced prompt using emergency format
-    return '''
-Context from local knowledge base:
-${relevantInfo.join('\n\n')}
-
-User Question: $userMessage
-
-Please provide a helpful response based on the context above and your knowledge. Format your response using the emergency response format with <response>, <summary>, <detailed_answer>, and <additional_info> tags.
-''';
+    return fullPrompt;
   }
 
   /// Load model once and keep it loaded for better performance
@@ -443,7 +498,6 @@ Please provide a helpful response based on the context above and your knowledge.
       if (availableModels.isNotEmpty) {
         // Load the first available model with timeout
         final modelPath = availableModels.first;
-        _loadedModelPath = modelPath;
 
         final loadSuccess =
             await _nativeModelService.loadModel(modelPath).timeout(
@@ -481,8 +535,10 @@ Please provide a helpful response based on the context above and your knowledge.
             userMessage, capsuleResults);
       }
 
-      // Use intelligent pattern-based responses from native model service
-      return await _nativeModelService.generateResponse(userMessage);
+      // Use intelligent pattern-based responses with system prompt from native model service
+      final systemPromptedMessage =
+          assistantSystemPrompt + '\n\nUser: $userMessage\n\nNaseerAI:';
+      return await _nativeModelService.generateResponse(systemPromptedMessage);
     } catch (e) {
       print('Error in fallback response: $e');
       return "I'm ready to help with your question. Let me use my local AI knowledge to provide you with the best answer I can.";
@@ -677,9 +733,11 @@ This information is stored locally and doesn't require internet access.
         // Remove markdown formatting artifacts and unwanted symbols
         .replaceAll(RegExp(r'\$\d+'), '') // Remove $1, $2, etc.
         .replaceAll(RegExp(r'[●•]'), '•') // Normalize bullet points
-        .replaceAll(RegExp(r'\*\s*'), '• ') // Convert asterisks to bullet points
+        .replaceAll(
+            RegExp(r'\*\s*'), '• ') // Convert asterisks to bullet points
         .replaceAll(RegExp(r'[-−]\s*'), '• ') // Convert dashes to bullet points
-        .replaceAll(RegExp(r'\d+\.\s*'), '• ') // Convert numbered lists to bullet points
+        .replaceAll(RegExp(r'\d+\.\s*'),
+            '• ') // Convert numbered lists to bullet points
         .replaceAll(RegExp(r'#{1,6}\s*'), '') // Remove markdown headers
         .replaceAll(RegExp(r'\*\*(.*?)\*\*'), r'$1') // Remove bold formatting
         .replaceAll(RegExp(r'\*(.*?)\*'), r'$1') // Remove italic formatting
@@ -687,6 +745,219 @@ This information is stored locally and doesn't require internet access.
         .trim();
 
     return cleaned;
+  }
+
+  /// Post-process model responses to improve quality for small models
+  String _postProcessResponse(String response, String userMessage) {
+    if (response.isEmpty) return response;
+
+    String processed = response;
+
+    // 1. Remove common model artifacts
+    processed = processed
+        .replaceAll(
+            RegExp(r'^(User:|NaseerAI:|Assistant:)\s*', multiLine: true), '')
+        .replaceAll(
+            RegExp(r'<\|.*?\|>', multiLine: true), '') // Remove special tokens
+        .replaceAll(RegExp(r'\[INST\].*?\[/INST\]', multiLine: true),
+            '') // Remove instruction tokens
+        .replaceAll(
+            RegExp(r'###.*?###', multiLine: true), '') // Remove section markers
+        .trim();
+
+    // 2. Fix repetitive content
+    processed = _removeRepetition(processed);
+
+    // 3. Ensure proper sentence structure
+    processed = _improveSentenceStructure(processed);
+
+    // 4. Add context-specific improvements
+    processed = _addContextSpecificImprovements(processed, userMessage);
+
+    // 5. Ensure proper length (not too short, not too long)
+    if (processed.length < 20) {
+      processed =
+          "I understand you're asking about $userMessage. Let me provide some helpful information: $processed";
+    } else if (processed.length > 1000) {
+      // Truncate very long responses but keep them coherent
+      final sentences = processed.split(RegExp(r'[.!?]+\s+'));
+      processed = '';
+      for (final sentence in sentences) {
+        if (processed.length + sentence.length > 800) break;
+        processed += sentence + '. ';
+      }
+      processed = processed.trim();
+    }
+
+    return processed;
+  }
+
+  /// Remove repetitive content from responses
+  String _removeRepetition(String text) {
+    final sentences = text.split(RegExp(r'[.!?]+\s+'));
+    final uniqueSentences = <String>[];
+    final seenContent = <String>{};
+
+    for (final sentence in sentences) {
+      final normalizedSentence = sentence.toLowerCase().trim();
+      if (normalizedSentence.length > 10 &&
+          !seenContent.contains(normalizedSentence)) {
+        seenContent.add(normalizedSentence);
+        uniqueSentences.add(sentence.trim());
+      }
+    }
+
+    return uniqueSentences.join('. ').trim();
+  }
+
+  /// Improve sentence structure and flow
+  String _improveSentenceStructure(String text) {
+    String improved = text;
+
+    // Fix common grammar issues
+    improved = improved
+        .replaceAll(RegExp(r'\s+'), ' ') // Multiple spaces
+        .replaceAll(RegExp(r'\.+'), '.') // Multiple periods
+        .replaceAll(RegExp(r'\?+'), '?') // Multiple question marks
+        .replaceAll(RegExp(r'!+'), '!') // Multiple exclamation marks
+        .replaceAll(RegExp(r',\s*,'), ',') // Double commas
+        .replaceAll(RegExp(r'^\s*[,.]'), '') // Leading punctuation
+        .trim();
+
+    // Ensure sentences start with capital letters
+    final sentences = improved.split(RegExp(r'(?<=[.!?])\s+'));
+    final correctedSentences = sentences.map((sentence) {
+      if (sentence.isNotEmpty) {
+        return sentence[0].toUpperCase() + sentence.substring(1);
+      }
+      return sentence;
+    }).toList();
+
+    return correctedSentences.join(' ').trim();
+  }
+
+  /// Add context-specific improvements based on user message
+  String _addContextSpecificImprovements(String response, String userMessage) {
+    String improved = response;
+
+    // For medical/emergency questions, ensure safety disclaimers
+    final medicalKeywords = [
+      'pain',
+      'injury',
+      'hurt',
+      'blood',
+      'emergency',
+      'accident',
+      'burn',
+      'cut',
+      'wound'
+    ];
+    final ismedical = medicalKeywords.any((keyword) =>
+        userMessage.toLowerCase().contains(keyword) ||
+        response.toLowerCase().contains(keyword));
+
+    if (ismedical &&
+        !response.contains('emergency') &&
+        !response.contains('seek medical')) {
+      improved +=
+          '\n\nNote: For serious injuries or emergencies, seek immediate professional medical help.';
+    }
+
+    // For unclear responses, add helpful context
+    if (response.length < 50 ||
+        response.contains('I don\'t know') ||
+        response.contains('unclear')) {
+      improved =
+          'Based on your question about "${userMessage.length > 50 ? userMessage.substring(0, 50) + "..." : userMessage}", $improved';
+    }
+
+    return improved.trim();
+  }
+
+  /// Evaluate response quality on a scale of 0-100
+  int _evaluateResponseQuality(String response, String userMessage) {
+    if (response.isEmpty) return 0;
+
+    int score = 50; // Base score
+
+    // Length evaluation
+    if (response.length < 20) {
+      score -= 30; // Too short
+    } else if (response.length > 50 && response.length < 300) {
+      score += 20; // Good length
+    } else if (response.length > 500) {
+      score -= 10; // Too long for small models
+    }
+
+    // Content quality checks
+    final lowercaseResponse = response.toLowerCase();
+    final lowercaseQuestion = userMessage.toLowerCase();
+
+    // Check for relevance (question keywords in response)
+    final questionWords =
+        lowercaseQuestion.split(' ').where((w) => w.length > 3).toSet();
+    final responseWords = lowercaseResponse.split(' ').toSet();
+    final matchingWords = questionWords.intersection(responseWords).length;
+    score += (matchingWords * 5).clamp(0, 20);
+
+    // Penalize poor quality indicators
+    if (lowercaseResponse.contains('i don\'t know')) score -= 20;
+    if (lowercaseResponse.contains('unclear') ||
+        lowercaseResponse.contains('confusing')) score -= 15;
+    if (lowercaseResponse.contains('error') ||
+        lowercaseResponse.contains('cannot')) score -= 10;
+
+    // Reward good quality indicators
+    if (lowercaseResponse.contains('steps') ||
+        lowercaseResponse.contains('follow')) score += 10;
+    if (lowercaseResponse.contains('first') ||
+        lowercaseResponse.contains('then')) score += 5;
+    if (RegExp(r'\d+\.').hasMatch(response)) score += 10; // Numbered lists
+
+    // Check for repetition
+    final sentences = response.split(RegExp(r'[.!?]+'));
+    final uniqueSentences = sentences.toSet().length;
+    if (uniqueSentences < sentences.length * 0.8) score -= 15; // Too repetitive
+
+    // Check sentence structure
+    if (!RegExp(r'^[A-Z]').hasMatch(response.trim()))
+      score -= 5; // Doesn't start with capital
+    if (!RegExp(r'[.!?]$').hasMatch(response.trim()))
+      score -= 5; // Doesn't end properly
+
+    return score.clamp(0, 100);
+  }
+
+  /// Create a focused retry prompt for better quality
+  String _createFocusedRetryPrompt(
+      String userMessage, CapsuleSearchResult capsuleResults) {
+    // Shorter, more direct prompt for retry attempts
+    String prompt = '''
+You are NaseerAI. Give a direct, helpful answer to this question.
+
+Question: $userMessage
+
+Instructions:
+- Be specific and practical
+- Use numbered steps if helpful
+- Keep it clear and concise
+- Don't repeat yourself
+
+Answer: ''';
+
+    // Add minimal context if available
+    if (capsuleResults.results.isNotEmpty) {
+      final bestResult = capsuleResults.results.first;
+      if (bestResult.similarity > 0.3) {
+        final context = _cleanTextContent(bestResult.content);
+        if (context.length < 200) {
+          prompt = prompt.replaceFirst('Answer: ',
+              'Context: ${context.substring(0, context.length.clamp(0, 150))}...\n\nAnswer: ');
+        }
+      }
+    }
+
+    return prompt;
   }
 
   // Delete a session
@@ -711,7 +982,28 @@ This information is stored locally and doesn't require internet access.
     return _capsuleSearchService.getAvailableCapsules();
   }
 
-  // System prompt for the assistant
-  final String assistantSystemPrompt =
-      "You are a knowledgeable and friendly assistant. Provide clear, concise, and accurate answers to user queries. If you are unsure, respond with 'I don't know' or suggest alternative ways to find the information.";
+  // System prompt for NaseerAI - optimized for small models
+  final String assistantSystemPrompt = '''
+You are NaseerAI, an expert offline medical and emergency assistant.
+
+CRITICAL INSTRUCTIONS:
+1. Always give direct, practical answers
+2. Use numbered steps for clarity
+3. Be specific and actionable
+4. Stay focused on the question asked
+5. Never mention internet or online resources
+
+RESPONSE FORMAT:
+For medical/emergency questions:
+1. [Immediate action needed]
+2. [Step-by-step instructions]
+3. [When to seek further help]
+
+For other questions:
+- Give direct, helpful answers
+- Use simple, clear language
+- Provide specific examples
+
+You have access to medical first aid knowledge. Always prioritize safety.
+''';
 }
