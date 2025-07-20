@@ -33,6 +33,17 @@ android {
             abiFilters.addAll(listOf("arm64-v8a", "armeabi-v7a", "x86_64"))
         }
 
+        // Packaging options to handle duplicate SO files
+        packaging {
+            resources {
+                pickFirsts += listOf(
+                    "**/libc++_shared.so",
+                    "**/libggml.so",
+                    "**/libllama.so"
+                )
+            }
+        }
+
         // External native build configuration - DISABLED
         // externalNativeBuild {
         //     cmake {
@@ -51,10 +62,19 @@ android {
     // }
 
     buildTypes {
+        debug {
+            // Debug build configuration
+            isDebuggable = true
+        }
         release {
             // TODO: Add your own signing config for the release build.
             // Signing with the debug keys for now, so `flutter run --release` works.
             signingConfig = signingConfigs.getByName("debug")
+            
+            // Optimize for release
+            isDebuggable = false
+            isMinifyEnabled = false
+            isShrinkResources = false
         }
     }
 }

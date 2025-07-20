@@ -10,7 +10,10 @@
         android:requestLegacyExternalStorage="true"
         android:label="naseerai"
         android:name="${applicationName}"
-        android:icon="@mipmap/ic_launcher">
+        android:icon="@mipmap/ic_launcher"
+        android:largeHeap="true"
+        android:hardwareAccelerated="true"
+        android:allowBackup="false">
         <activity
             android:name=".MainActivity"
             android:exported="true"
