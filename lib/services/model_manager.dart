@@ -168,6 +168,46 @@ class ModelManager {
     }
   }
 
+  /// Get the chat models directory from external storage
+  Future<Directory> get chatModelsDirectory async {
+    final chatModelsDir = Directory(AppConstants.chatModelDir);
+    if (!await chatModelsDir.exists()) {
+      await chatModelsDir.create(recursive: true);
+    }
+    return chatModelsDir;
+  }
+
+  /// Check if a file is a valid GGUF model
+  Future<bool> isValidGGUFModel(String modelPath) async {
+    try {
+      final file = File(modelPath);
+      if (!await file.exists()) {
+        return false;
+      }
+
+      // Check file size (should be at least 1MB for a real model)
+      final size = await file.length();
+      if (size < 1000000) {
+        return false;
+      }
+
+      // Check GGUF magic bytes
+      final bytes = await file.openRead(0, 4).first;
+      final magic = String.fromCharCodes(bytes);
+      return magic == 'GGUF';
+    } catch (e) {
+      print('Error validating GGUF model: $e');
+      return false;
+    }
+  }
+
+  /// Check if model exists in the chat models directory
+  Future<bool> get isChatModelAvailable async {
+    final chatModelsDir = await chatModelsDirectory;
+    final modelPath = '${chatModelsDir.path}/${AppConstants.chatModelName}';
+    return await isValidGGUFModel(modelPath);
+  }
+
   /// Get model info
   Future<Map<String, dynamic>> getModelInfo(String modelPath) async {
     try {

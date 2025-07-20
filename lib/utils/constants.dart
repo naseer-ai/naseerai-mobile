@@ -75,4 +75,8 @@ class AppConstants {
   static const String chatModelDir =
       '/storage/emulated/0/naseerai/models/chat/';
   static const String capsulesDir = '/storage/emulated/0/naseerai/capsules';
+  
+  // Additional constants for model management
+  static const String defaultModelFileName = chatModelName;
+  static const String chatModelsPath = chatModelDir;
 }

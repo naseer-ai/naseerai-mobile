@@ -3,10 +3,12 @@ import 'package:flutter/services.dart';
 import 'dart:async';
 import '../models/chat_message.dart';
 import '../services/chat_service.dart';
+import '../services/model_manager.dart';
 import '../widgets/chat_message_widget.dart';
 import '../widgets/chat_input_widget.dart';
 import '../widgets/suggestions_widget.dart';
 import '../widgets/typing_indicator.dart';
+import '../widgets/model_install_dialog.dart';
 
 class ChatScreen extends StatefulWidget {
   const ChatScreen({super.key});
@@ -40,6 +42,34 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
     });
 
     try {
+      // Check if model is available first
+      final isModelAvailable = await ModelManager.instance.isChatModelAvailable;
+      
+      if (!isModelAvailable) {
+        setState(() {
+          _isLoading = false;
+        });
+        
+        // Show model install dialog
+        final shouldInstall = await _showModelInstallDialog();
+        if (!shouldInstall) {
+          // User cancelled, show error state
+          _showErrorSnackBar('AI model is required to start chatting');
+          return;
+        }
+        
+        // Check again after potential installation
+        final isNowAvailable = await ModelManager.instance.isChatModelAvailable;
+        if (!isNowAvailable) {
+          _showErrorSnackBar('Model installation failed or was cancelled');
+          return;
+        }
+        
+        setState(() {
+          _isLoading = true;
+        });
+      }
+
       // Initialize chat service
       await _chatService.initialize();
 
@@ -163,6 +193,15 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
         ),
       );
     }
+  }
+
+  Future<bool> _showModelInstallDialog() async {
+    final result = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => const ModelInstallDialog(),
+    );
+    return result ?? false;
   }
 
   Future<void> _copyMessage(String content) async {

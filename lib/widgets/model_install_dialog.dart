@@ -17,7 +17,7 @@ class _ModelInstallDialogState extends State<ModelInstallDialog> {
   String _downloadStatus = '';
 
   static const String _modelUrl = 'https://huggingface.co/Qwen/Qwen2-1.5B-Instruct-GGUF/resolve/main/qwen2-1_5b-instruct-q4_k_m.gguf';
-  static const String _modelFileName = AppConstants.defaultModelFileName;
+  static const String _modelFileName = AppConstants.chatModelName;
 
   @override
   Widget build(BuildContext context) {
