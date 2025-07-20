@@ -2,7 +2,6 @@ import 'dart:ffi';
 import 'dart:io';
 import 'dart:isolate';
 import 'package:ffi/ffi.dart';
-import 'package:path_provider/path_provider.dart';
 import '../models/ai_model.dart';
 import 'model_manager.dart';
 
@@ -289,35 +288,20 @@ class LlamaService {
     try {
       final List<String> models = [];
 
-      // Check model_files directory
-      final Directory modelDir = Directory(
-          '/mnt/7cf8f1e2-f6ee-43b6-8f39-749a39730a18/Projects/NaseerAI/naseerai-mobile/model_files');
+      // Only check the specified chat models directory
+      final Directory chatModelsDir = Directory('/storage/emulated/0/naseerai/models/chat/');
 
-      if (await modelDir.exists()) {
-        await for (FileSystemEntity entity in modelDir.list()) {
+      if (await chatModelsDir.exists()) {
+        await for (FileSystemEntity entity in chatModelsDir.list()) {
           if (entity is File && entity.path.endsWith('.gguf')) {
             models.add(entity.path);
           }
         }
+      } else {
+        print('⚠️ Chat models directory does not exist: /storage/emulated/0/naseerai/models/chat/');
       }
 
-      // Also check external storage for models
-      try {
-        final Directory appDir = await getApplicationDocumentsDirectory();
-        final Directory modelsDir = Directory('${appDir.path}/models');
-
-        if (await modelsDir.exists()) {
-          await for (FileSystemEntity entity in modelsDir.list()) {
-            if (entity is File && entity.path.endsWith('.gguf')) {
-              models.add(entity.path);
-            }
-          }
-        }
-      } catch (e) {
-        print('Note: Could not access external models directory: $e');
-      }
-
-      print('📁 Found ${models.length} GGUF models');
+      print('📁 Found ${models.length} GGUF models in chat directory');
       return models;
     } catch (e) {
       print('❌ Error getting available models: $e');
