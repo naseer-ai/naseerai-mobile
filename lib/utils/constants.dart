@@ -4,7 +4,9 @@ class AppConstants {
   static const String appDescription =
       'Qwen2 1.5B Instruct Mobile AI Assistant - Local inference on Android';
 
-  static const String defaultModelPath = 'model_files/qwen2-1_5b-instruct-q4_k_m.gguf';
+  // Legacy constants (kept for compatibility but not used)
+  static const String defaultModelPath =
+      'model_files/qwen2-1_5b-instruct-q4_k_m.gguf';
   static const String modelsDirectory = 'model_files/';
 
   static const int maxInputLength = 512;
@@ -69,4 +71,13 @@ class AppConstants {
     'inference_complete': 'Inference completed successfully.',
     'model_unloaded': 'Model unloaded successfully.',
   };
+
+  static const String chatModelName = 'tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf';
+  static const String chatModelDir =
+      '/storage/emulated/0/naseerai/models/chat/';
+  static const String capsulesDir = '/storage/emulated/0/naseerai/capsules';
+
+  // Additional constants for model management
+  static const String defaultModelFileName = chatModelName;
+  static const String chatModelsPath = chatModelDir;
 }

@@ -1,10 +1,14 @@
 import 'dart:ffi';
 import 'dart:io';
 import 'dart:isolate';
+import 'dart:typed_data';
 import 'package:ffi/ffi.dart';
-import 'package:path_provider/path_provider.dart';
 import '../models/ai_model.dart';
 import 'model_manager.dart';
+import '../utils/device_info.dart';
+import '../utils/memory_monitor.dart';
+import '../utils/model_config_optimizer.dart';
+import '../utils/crash_recovery.dart';
 
 // C function signatures for llama.cpp integration
 typedef InitModelC = Int32 Function(Pointer<Utf8> modelPath);
@@ -44,6 +48,8 @@ class LlamaService {
   DynamicLibrary? _lib;
   AIModel? _activeModel;
   bool _isInitialized = false;
+  bool _isModelLoading = false;
+  final MemoryMonitor _memoryMonitor = MemoryMonitor();
 
   // Function pointers
   late InitModelDart _initModel;
@@ -61,6 +67,17 @@ class LlamaService {
     try {
       if (_isInitialized) return true;
 
+      // Check for crash recovery
+      final isRecovering = await CrashRecovery.isRecoveringFromCrash();
+      if (isRecovering) {
+        print('🚑 Detected potential previous crash - applying recovery mode');
+        final recommendations = await CrashRecovery.getRecoveryRecommendations();
+        for (final rec in recommendations) {
+          print('💡 $rec');
+        }
+      }
+
+      await CrashRecovery.saveState(operation: 'service_initialization');
       print('🔧 Initializing Llama.cpp Service...');
 
       // Load the native library with Android-specific handling
@@ -107,6 +124,7 @@ class LlamaService {
             .lookupFunction<CleanupModelC, CleanupModelDart>('cleanup_model');
 
         _isInitialized = true;
+        await CrashRecovery.clearRecoveryState(); // Clear any previous crash state
         print(
             '✅ Llama.cpp Service initialized successfully with native acceleration');
         return true;
@@ -122,73 +140,201 @@ class LlamaService {
     }
   }
 
-  /// Load a GGUF model from the given path with ANR prevention
+  /// Load a GGUF model from the given path with comprehensive safety checks
   Future<bool> loadModel(String modelPath) async {
     try {
+      // Prevent concurrent model loading
+      if (_isModelLoading) {
+        print('⚠️ Model loading already in progress');
+        return false;
+      }
+      _isModelLoading = true;
+
       if (!_isInitialized) {
         final initialized = await initialize();
-        if (!initialized) return false;
+        if (!initialized) {
+          _isModelLoading = false;
+          return false;
+        }
       }
 
       print('🧠 Loading GGUF model from: $modelPath');
 
-      // Check if file exists
+      // Pre-flight safety checks including memory requirements
+      final safetyCheck = await _performSafetyChecks(modelPath);
+      if (!safetyCheck) {
+        _isModelLoading = false;
+        return false;
+      }
+
+      // Additional check for model loading safety (with override for testing)
+      final isLoadingSafe = await ModelConfigOptimizer.isModelLoadingSafe(modelPath);
+      if (!isLoadingSafe) {
+        print('⚠️ Model loading not recommended with current memory conditions');
+        print('💡 Attempting to load anyway for testing (monitor for crashes)');
+        // Continue with loading for testing - remove this override in production
+      }
+
+      // Load model in background with enhanced monitoring
+      final result = await _loadModelInBackground(modelPath);
+      _isModelLoading = false;
+      return result;
+    } catch (e) {
+      print('❌ Error loading model: $e');
+      _isModelLoading = false;
+      return false;
+    }
+  }
+
+  /// Perform comprehensive safety checks before loading model
+  Future<bool> _performSafetyChecks(String modelPath) async {
+    try {
+      // Check if file exists and is readable
       final file = File(modelPath);
       if (!await file.exists()) {
         print('❌ Model file not found: $modelPath');
         return false;
       }
 
-      // Load model in background to prevent ANR
-      return await _loadModelInBackground(modelPath);
+      // Get file size
+      final fileSize = await file.length();
+      print('📊 Model file size: ${(fileSize / (1024 * 1024)).toStringAsFixed(1)} MB');
+
+      // Device capability check
+      final deviceInfo = await DeviceInfo.getDeviceInfo();
+      final availableRAM = deviceInfo['availableMemoryMB'] ?? 0;
+      final totalRAM = deviceInfo['totalMemoryMB'] ?? 0;
+
+      print('📱 Device RAM: ${totalRAM}MB total, ${availableRAM}MB available');
+
+      // Realistic memory requirements (model size + reasonable overhead)
+      final fileSizeMB = fileSize / (1024 * 1024);
+      final requiredRAM = fileSizeMB + (fileSizeMB * 0.3); // 30% overhead for GGUF loading
+      
+      if (availableRAM < requiredRAM) {
+        print('⚠️ Insufficient memory: need ${requiredRAM.toStringAsFixed(0)}MB, have ${availableRAM}MB');
+        
+        // Try with minimal overhead if close to requirement
+        final minimalRequiredRAM = fileSizeMB + 50; // Just 50MB overhead
+        if (availableRAM >= minimalRequiredRAM) {
+          print('💡 Attempting minimal overhead loading...');
+          return true; // Allow loading with minimal overhead
+        }
+        
+        print('💡 Suggestion: Close other apps or restart device');
+        return false;
+      }
+
+      // Validate GGUF file format
+      if (!await _validateGGUFFile(file)) {
+        print('❌ Invalid GGUF file format');
+        return false;
+      }
+
+      return true;
     } catch (e) {
-      print('❌ Error loading model: $e');
+      print('❌ Safety check failed: $e');
       return false;
     }
   }
 
-  /// Load model in background to prevent UI blocking
+  /// Validate GGUF file format
+  Future<bool> _validateGGUFFile(File file) async {
+    try {
+      final bytes = await file.openRead(0, 8).expand((chunk) => chunk).toList();
+      if (bytes.length < 4) return false;
+      
+      final magic = String.fromCharCodes(bytes.sublist(0, 4));
+      return magic == 'GGUF';
+    } catch (e) {
+      print('Error validating GGUF file: $e');
+      return false;
+    }
+  }
+
+  /// Load model in background with enhanced monitoring and safety
   Future<bool> _loadModelInBackground(String modelPath) async {
+    Pointer<Utf8>? pathPtr;
     try {
       return await Future.microtask(() async {
-        // Add small delay to allow UI to breathe
-        await Future.delayed(const Duration(milliseconds: 50));
+        // Start memory monitoring
+        _memoryMonitor.startMonitoring();
+        
+        // Gradual loading with UI updates
+        await Future.delayed(const Duration(milliseconds: 100));
+        print('🔄 Initializing model loader...');
+        
+        await Future.delayed(const Duration(milliseconds: 100));
+        print('🔄 Allocating memory...');
         
         // Convert path to C string
-        final pathPtr = modelPath.toNativeUtf8();
+        pathPtr = modelPath.toNativeUtf8();
 
-        try {
-          final result = _initModel(pathPtr);
+        print('🔄 Loading model into memory...');
+        final result = _initModel(pathPtr!);
 
-          if (result == 0) {
-            _activeModel = AIModel(
-              id: 'llama_model_1',
-              name: 'Llama.cpp Model',
-              modelPath: modelPath,
-              type: ModelType.textGeneration,
-              version: '1.0.0',
-            );
-            _activeModel!.setStatus(ModelStatus.loaded);
+        if (result == 0) {
+          _activeModel = AIModel(
+            id: 'llama_model_1',
+            name: 'Llama.cpp Model (${modelPath.split('/').last})',
+            modelPath: modelPath,
+            type: ModelType.textGeneration,
+            version: '1.0.0',
+          );
+          _activeModel!.setStatus(ModelStatus.loaded);
 
-            print('✅ GGUF model loaded successfully');
+          // Validate model is actually loaded
+          if (_isModelLoaded() == 1) {
+            print('✅ GGUF model loaded and validated successfully');
+            _memoryMonitor.logCurrentUsage('After model load');
+            
+            // Apply optimal generation parameters
+            await setOptimalGenerationParameters(modelPath);
+            
+            print('🎯 Model configured with optimal parameters');
             return true;
           } else {
-            print('❌ Failed to load model (C function returned: $result)');
+            print('❌ Model loading reported success but validation failed');
             return false;
           }
-        } finally {
-          malloc.free(pathPtr);
+        } else {
+          print('❌ Failed to load model (C function returned: $result)');
+          _handleLoadingError(result);
+          return false;
         }
       }).timeout(
-        const Duration(seconds: 45), // Generous timeout for model loading
+        const Duration(seconds: 60), // Increased timeout for safety
         onTimeout: () {
-          print('⏰ Model loading timed out');
+          print('⏰ Model loading timed out - this may indicate insufficient resources');
+          if (pathPtr != null) malloc.free(pathPtr!);
+          _memoryMonitor.stopMonitoring();
           return false;
         },
       );
     } catch (e) {
       print('❌ Background model loading error: $e');
+      if (pathPtr != null) malloc.free(pathPtr!);
+      _memoryMonitor.stopMonitoring();
       return false;
+    } finally {
+      if (pathPtr != null) malloc.free(pathPtr!);
+    }
+  }
+
+  /// Handle specific loading errors with helpful messages
+  void _handleLoadingError(int errorCode) {
+    switch (errorCode) {
+      case -1:
+        print('💡 Error -1: File format issue. Ensure model is proper GGUF format.');
+        break;
+      case -2:
+        print('💡 Error -2: Memory allocation failed. Try closing other apps.');
+        break;
+      case -3:
+        print('💡 Error -3: Model architecture unsupported.');
+        break;
+      default:
+        print('💡 Error $errorCode: General loading failure. Check model file integrity.');
     }
   }
 
@@ -247,40 +393,281 @@ class LlamaService {
     }
   }
 
-  /// Run model inference in background with timeout to prevent ANR
+  /// Run model inference with comprehensive safety and monitoring
   Future<String> _runModelInferenceInBackground(String prompt, int maxTokens) async {
+    Pointer<Utf8>? promptPtr;
     try {
-      // Use compute-like functionality with Future to prevent UI blocking
+      // Validate inputs
+      if (prompt.trim().isEmpty) {
+        return "Please provide a question or prompt.";
+      }
+
+      // Limit prompt length to prevent memory issues
+      final trimmedPrompt = prompt.length > 2048 
+          ? prompt.substring(0, 2048) + "..."
+          : prompt;
+
+      // Adjust maxTokens based on available memory
+      final safeMaxTokens = await _calculateSafeTokenLimit(maxTokens);
+      
       return await Future.microtask(() async {
-        // Add small delay to allow UI to update
-        await Future.delayed(const Duration(milliseconds: 10));
+        // Start memory monitoring for inference
+        _memoryMonitor.logCurrentUsage('Before inference');
         
-        final promptPtr = prompt.toNativeUtf8();
+        // Progressive delays to prevent resource contention
+        await Future.delayed(const Duration(milliseconds: 50));
+        print('🤖 Starting inference (${safeMaxTokens} max tokens)...');
+        
+        await Future.delayed(const Duration(milliseconds: 50));
+        
+        // Convert prompt to C string with error handling
         try {
-          final responsePtr = _generateText(promptPtr, maxTokens);
+          promptPtr = trimmedPrompt.toNativeUtf8();
+        } catch (e) {
+          return "Error: Failed to process prompt encoding";
+        }
+
+        Pointer<Utf8>? responsePtr;
+        try {
+          // Call native inference function
+          responsePtr = _generateText(promptPtr!, safeMaxTokens);
 
           if (responsePtr == nullptr) {
-            return "Error: Failed to generate response";
+            return "I'm having trouble generating a response right now. Please try again.";
           }
 
-          final response = responsePtr.toDartString();
-          _freeString(responsePtr);
+          // Extract response with validation and cleanup
+          final rawResponse = responsePtr.toDartString();
+          
+          // Validate response quality
+          if (rawResponse.trim().isEmpty) {
+            return "I generated an empty response. Please try rephrasing your question.";
+          }
 
-          print('✅ Generated response (${response.length} chars)');
-          return response;
+          if (rawResponse.length < 3) {
+            return "I generated a very short response. Please try asking a more specific question.";
+          }
+
+          // Clean and improve response quality
+          final cleanedResponse = _cleanAndImproveResponse(rawResponse, trimmedPrompt);
+          
+          // Apply identity correction for NaseerAI
+          final finalResponse = _correctIdentityIssues(cleanedResponse);
+          
+          _memoryMonitor.logCurrentUsage('After inference');
+          print('✅ Generated response (${finalResponse.length} chars)');
+          return finalResponse;
+          
         } finally {
-          malloc.free(promptPtr);
+          if (responsePtr != null && responsePtr != nullptr) {
+            try {
+              _freeString(responsePtr);
+            } catch (e) {
+              print('Warning: Failed to free response memory: $e');
+            }
+          }
         }
       }).timeout(
-        const Duration(seconds: 20), // Reduced timeout for faster fallback
+        const Duration(seconds: 30), // Balanced timeout
         onTimeout: () {
+          _memoryMonitor.logCurrentUsage('After timeout');
           print('⏰ Model inference timed out');
-          return "I'm taking too long to respond. Let me give you a quick answer instead: I'm here to help with your questions. Could you try asking something simpler?";
+          return "I'm taking longer than expected to process your request. This might be due to high system load. Please try a simpler question or restart the app if this persists.";
         },
       );
     } catch (e) {
+      _memoryMonitor.logCurrentUsage('After error');
       print('❌ Background inference error: $e');
-      return "I encountered an issue processing your request. Please try again with a simpler question.";
+      return "I encountered a technical issue: ${e.toString().length > 100 ? 'Internal processing error' : e.toString()}. Please try again.";
+    } finally {
+      if (promptPtr != null) {
+        try {
+          malloc.free(promptPtr!);
+        } catch (e) {
+          print('Warning: Failed to free prompt memory: $e');
+        }
+      }
+    }
+  }
+
+  /// Calculate safe token limit based on available memory
+  Future<int> _calculateSafeTokenLimit(int requestedTokens) async {
+    try {
+      final deviceInfo = await DeviceInfo.getDeviceInfo();
+      final availableRAM = deviceInfo['availableMemoryMB'] ?? 2048;
+      
+      // Conservative token limits based on available memory
+      int safeLimit;
+      if (availableRAM >= 3072) {
+        safeLimit = 512; // High memory devices
+      } else if (availableRAM >= 2048) {
+        safeLimit = 256; // Medium memory devices
+      } else if (availableRAM >= 1024) {
+        safeLimit = 128; // Low memory devices
+      } else {
+        safeLimit = 64;  // Very low memory devices
+      }
+      
+      final finalLimit = requestedTokens > safeLimit ? safeLimit : requestedTokens;
+      if (finalLimit != requestedTokens) {
+        print('📉 Reduced token limit from $requestedTokens to $finalLimit for stability');
+      }
+      
+      return finalLimit;
+    } catch (e) {
+      print('Error calculating token limit: $e');
+      return requestedTokens > 128 ? 128 : requestedTokens; // Conservative fallback
+    }
+  }
+
+  /// Clean and improve response quality
+  String _cleanAndImproveResponse(String rawResponse, String originalPrompt) {
+    try {
+      String cleaned = rawResponse.trim();
+      
+      // Remove common model artifacts
+      cleaned = _removeModelArtifacts(cleaned);
+      
+      // Handle duplicates and repetition
+      cleaned = _removeDuplicateContent(cleaned);
+      
+      // Improve sentence structure
+      cleaned = _improveSentenceStructure(cleaned);
+      
+      // Ensure proper ending
+      cleaned = _ensureProperEnding(cleaned);
+      
+      return cleaned.trim();
+    } catch (e) {
+      print('Error cleaning response: $e');
+      return rawResponse.trim();
+    }
+  }
+
+  /// Remove model-specific artifacts and unwanted patterns
+  String _removeModelArtifacts(String text) {
+    // Remove common model prefixes/suffixes
+    text = text.replaceAll(RegExp(r'^(Assistant:|AI:|Response:|Answer:)\s*', caseSensitive: false), '');
+    text = text.replaceAll(RegExp(r'\s*(\[END\]|</s>|<\|end\|>)\s*$'), '');
+    
+    // Remove excessive newlines
+    text = text.replaceAll(RegExp(r'\n{3,}'), '\n\n');
+    
+    // Remove trailing incomplete sentences
+    text = text.replaceAll(RegExp(r'\s+$'), '');
+    
+    return text;
+  }
+
+  /// Remove duplicate sentences and paragraphs with enhanced detection
+  String _removeDuplicateContent(String text) {
+    final sentences = text.split(RegExp(r'[.!?]+\s+'));
+    final uniqueSentences = <String>[];
+    final seenSentences = <String>{};
+    
+    for (String sentence in sentences) {
+      final normalized = sentence.trim().toLowerCase()
+          .replaceAll(RegExp(r'[^\w\s]'), '') // Remove punctuation for comparison
+          .replaceAll(RegExp(r'\s+'), ' ');   // Normalize whitespace
+      
+      if (normalized.isNotEmpty && normalized.length > 3) {
+        // Check for exact matches and similar content
+        bool isDuplicate = false;
+        for (String seen in seenSentences) {
+          if (_areSentencesSimilar(normalized, seen)) {
+            isDuplicate = true;
+            break;
+          }
+        }
+        
+        if (!isDuplicate) {
+          seenSentences.add(normalized);
+          uniqueSentences.add(sentence.trim());
+        }
+      }
+    }
+    
+    return uniqueSentences.join('. ').replaceAll(RegExp(r'\.\s*\.\s*'), '. ');
+  }
+  
+  /// Check if two sentences are similar (to catch near-duplicates)
+  bool _areSentencesSimilar(String sentence1, String sentence2) {
+    if (sentence1 == sentence2) return true;
+    
+    // Simple similarity check - if one sentence contains most words of another
+    final words1 = sentence1.split(' ').where((w) => w.length > 2).toSet();
+    final words2 = sentence2.split(' ').where((w) => w.length > 2).toSet();
+    
+    if (words1.isEmpty || words2.isEmpty) return false;
+    
+    final intersection = words1.intersection(words2).length;
+    final smaller = words1.length < words2.length ? words1.length : words2.length;
+    
+    return intersection / smaller > 0.7; // 70% word overlap threshold
+  }
+
+  /// Improve sentence structure and flow
+  String _improveSentenceStructure(String text) {
+    // Fix common grammatical issues
+    text = text.replaceAll(RegExp(r'\s+'), ' '); // Multiple spaces
+    text = text.replaceAll(RegExp(r'([.!?])([A-Z])'), r'\1 \2'); // Missing space after punctuation
+    
+    // Capitalize first letter
+    if (text.isNotEmpty) {
+      text = text[0].toUpperCase() + text.substring(1);
+    }
+    
+    return text;
+  }
+
+  /// Ensure response ends properly
+  String _ensureProperEnding(String text) {
+    if (text.isEmpty) return text;
+    
+    // Check if ends with proper punctuation
+    final lastChar = text[text.length - 1];
+    if (!['.', '!', '?'].contains(lastChar)) {
+      // Find the last complete sentence
+      final lastPunctuation = text.lastIndexOf(RegExp(r'[.!?]'));
+      if (lastPunctuation > text.length - 50) { // If punctuation is near the end
+        text = text.substring(0, lastPunctuation + 1);
+      } else {
+        text += '.';
+      }
+    }
+    
+    return text;
+  }
+
+  /// Correct identity issues in responses
+  String _correctIdentityIssues(String response) {
+    try {
+      String corrected = response;
+      
+      // Replace Jessica mentions with NaseerAI
+      corrected = corrected.replaceAll(RegExp(r'\bJessica\b', caseSensitive: false), 'NaseerAI');
+      corrected = corrected.replaceAll(RegExp(r"I'm Jessica\b", caseSensitive: false), "I'm NaseerAI");
+      corrected = corrected.replaceAll(RegExp(r'\bI am Jessica\b', caseSensitive: false), 'I am NaseerAI');
+      corrected = corrected.replaceAll(RegExp(r'\bMy name is Jessica\b', caseSensitive: false), 'My name is NaseerAI');
+      
+      // Replace generic assistant mentions
+      corrected = corrected.replaceAll(RegExp(r"I'm a writer\b", caseSensitive: false), "I'm an AI assistant");
+      corrected = corrected.replaceAll(RegExp(r'\bI am a writer\b', caseSensitive: false), 'I am an AI assistant');
+      
+      // Fix common identity patterns
+      corrected = corrected.replaceAll(RegExp(r'\bJESSICA:\s*\([^)]*\)\s*', caseSensitive: false), 'NaseerAI: ');
+      corrected = corrected.replaceAll(RegExp(r'\bJessica:\s*', caseSensitive: false), 'NaseerAI: ');
+      
+      // If the response starts with wrong identity, replace with proper introduction
+      if (corrected.toLowerCase().contains('jessica') || 
+          (corrected.toLowerCase().contains('writer') && corrected.toLowerCase().contains("i'm"))) {
+        corrected = "Hello! I'm NaseerAI, your offline AI assistant. I'm here to help you with information and support without needing an internet connection. How can I assist you today?";
+      }
+      
+      return corrected;
+    } catch (e) {
+      print('Error correcting identity issues: $e');
+      return response;
     }
   }
 
@@ -289,35 +676,20 @@ class LlamaService {
     try {
       final List<String> models = [];
 
-      // Check model_files directory
-      final Directory modelDir = Directory(
-          '/mnt/7cf8f1e2-f6ee-43b6-8f39-749a39730a18/Projects/NaseerAI/naseerai-mobile/model_files');
+      // Only check the specified chat models directory
+      final Directory chatModelsDir = Directory('/storage/emulated/0/naseerai/models/chat/');
 
-      if (await modelDir.exists()) {
-        await for (FileSystemEntity entity in modelDir.list()) {
+      if (await chatModelsDir.exists()) {
+        await for (FileSystemEntity entity in chatModelsDir.list()) {
           if (entity is File && entity.path.endsWith('.gguf')) {
             models.add(entity.path);
           }
         }
+      } else {
+        print('⚠️ Chat models directory does not exist: /storage/emulated/0/naseerai/models/chat/');
       }
 
-      // Also check external storage for models
-      try {
-        final Directory appDir = await getApplicationDocumentsDirectory();
-        final Directory modelsDir = Directory('${appDir.path}/models');
-
-        if (await modelsDir.exists()) {
-          await for (FileSystemEntity entity in modelsDir.list()) {
-            if (entity is File && entity.path.endsWith('.gguf')) {
-              models.add(entity.path);
-            }
-          }
-        }
-      } catch (e) {
-        print('Note: Could not access external models directory: $e');
-      }
-
-      print('📁 Found ${models.length} GGUF models');
+      print('📁 Found ${models.length} GGUF models in chat directory');
       return models;
     } catch (e) {
       print('❌ Error getting available models: $e');
@@ -348,7 +720,32 @@ class LlamaService {
     }
   }
 
-  /// Configure generation parameters
+  /// Configure generation parameters with optimization
+  Future<void> setOptimalGenerationParameters([String? modelPath]) async {
+    if (!_isInitialized) return;
+
+    try {
+      final config = await ModelConfigOptimizer.getOptimalConfig(
+        modelPath: modelPath ?? _activeModel?.modelPath,
+      );
+      
+      print('🔧 Applying optimal config: $config');
+      
+      _setTemperature(config.temperature);
+      _setTopK(config.topK);
+      _setTopP(config.topP);
+      
+      print('✅ Generation parameters optimized for device');
+    } catch (e) {
+      print('❌ Error setting optimal parameters: $e');
+      // Fallback to safe defaults
+      _setTemperature(0.7);
+      _setTopK(40);
+      _setTopP(0.9);
+    }
+  }
+
+  /// Configure generation parameters manually
   void setGenerationParameters({
     double? temperature,
     int? topK,

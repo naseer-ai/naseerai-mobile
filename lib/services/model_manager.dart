@@ -1,6 +1,6 @@
 import 'dart:io';
-import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
+import '../utils/constants.dart';
 
 /// Service for managing AI model files
 class ModelManager {
@@ -8,125 +8,45 @@ class ModelManager {
   static ModelManager get instance => _instance ??= ModelManager._();
   ModelManager._();
 
-  static const String _modelFileName = 'qwen2-1_5b-instruct-q4_k_m.gguf';
-  
-  /// Get the app's models directory
-  Future<Directory> get modelsDirectory async {
-    final appDir = await getApplicationDocumentsDirectory();
-    final modelsDir = Directory('${appDir.path}/models');
-    if (!await modelsDir.exists()) {
-      await modelsDir.create(recursive: true);
-    }
-    return modelsDir;
-  }
 
-  /// Get the path to the Qwen2 model
-  Future<String> get qwen2ModelPath async {
-    final modelsDir = await modelsDirectory;
-    return '${modelsDir.path}/$_modelFileName';
-  }
-
-  /// Check if Qwen2 model exists
-  Future<bool> get isQwen2ModelAvailable async {
-    final modelPath = await qwen2ModelPath;
-    final modelFile = File(modelPath);
-    if (await modelFile.exists()) {
-      // Check if it's a valid GGUF file (not just our placeholder)
-      final bytes = await modelFile.openRead(0, 4).first;
-      final magic = String.fromCharCodes(bytes);
-      return magic == 'GGUF' && await modelFile.length() > 1000000; // At least 1MB
-    }
-    return false;
-  }
-
-  /// Copy model from project directory to app directory
+  /// Check if Qwen2 model exists in chat directory
   Future<bool> setupQwen2Model() async {
     try {
-      // Check if model already exists
-      if (await isQwen2ModelAvailable) {
-        print('✅ Qwen2 1.5B Instruct model already available');
+      // Check if model exists in chat directory
+      if (await isChatModelAvailable) {
+        print('✅ Qwen2 1.5B Instruct model available in chat directory');
         return true;
       }
 
-      // Try to copy from project model_files directory
-      final projectModelPath = 'model_files/$_modelFileName';
-      final projectFile = File(projectModelPath);
-      
-      if (await projectFile.exists()) {
-        final modelPath = await qwen2ModelPath;
-        await projectFile.copy(modelPath);
-        print('✅ Qwen2 1.5B Instruct model copied to app directory');
-        return true;
-      }
-
-      // Try to copy from Downloads directory if available
-      if (await _copyFromDownloads()) {
-        return true;
-      }
-
-      print('⚠️ Qwen2 1.5B Instruct model not found. Please download it to model_files/$_modelFileName');
+      print('⚠️ Qwen2 1.5B Instruct model not found in chat directory. Please place it in ${AppConstants.chatModelDir}');
       return false;
     } catch (e) {
-      print('❌ Error setting up Qwen2 1.5B Instruct model: $e');
+      print('❌ Error checking Qwen2 1.5B Instruct model: $e');
       return false;
     }
   }
-  
-  /// Try to copy model from Downloads directory to app directory
-  Future<bool> _copyFromDownloads() async {
-    try {
-      // Check if we have storage permission
-      var status = await Permission.storage.status;
-      if (!status.isGranted) {
-        status = await Permission.storage.request();
-        if (!status.isGranted) {
-          return false;
-        }
-      }
-      
-      final downloadsFile = File('/storage/emulated/0/Download/$_modelFileName');
-      if (await downloadsFile.exists()) {
-        final modelPath = await qwen2ModelPath;
-        await downloadsFile.copy(modelPath);
-        print('✅ Qwen2 1.5B Instruct model copied from Downloads to app directory');
-        return true;
-      }
-      
-      return false;
-    } catch (e) {
-      print('Error copying from Downloads: $e');
-      return false;
-    }
-  }
+
 
   /// Get all available GGUF models
   Future<List<String>> getAvailableModels() async {
     final models = <String>[];
-    
+
     try {
-      // Check app's models directory
-      final modelsDir = await modelsDirectory;
-      await for (final entity in modelsDir.list()) {
-        if (entity is File && entity.path.endsWith('.gguf')) {
-          models.add(entity.path);
-        }
-      }
-      
-      // Also check Downloads directory for GGUF models
+      // Only check the designated chat models directory
       await _checkDownloadsDirectory(models);
     } catch (e) {
       print('Error scanning models: $e');
     }
-    
+
     return models;
   }
-  
+
   /// Check Downloads directory for GGUF models with proper permissions
   Future<void> _checkDownloadsDirectory(List<String> models) async {
     try {
       // Try different permission strategies based on Android version
       bool hasPermission = false;
-      
+
       // Try manage external storage permission (Android 11+)
       if (await Permission.manageExternalStorage.isGranted) {
         hasPermission = true;
@@ -143,15 +63,15 @@ class ModelManager {
           hasPermission = storageStatus.isGranted;
         }
       }
-      
+
       if (!hasPermission) {
         print('Storage permission denied');
         return;
       }
-      
-      final downloadsDir = Directory('/storage/emulated/0/Download');
+
+      final downloadsDir = Directory(AppConstants.chatModelDir);
       if (await downloadsDir.exists()) {
-        print('Scanning Downloads directory for GGUF models...');
+        print('Scanning for GGUF models...');
         await for (final entity in downloadsDir.list()) {
           if (entity is File && entity.path.endsWith('.gguf')) {
             print('Found GGUF model: ${entity.path}');
@@ -160,8 +80,48 @@ class ModelManager {
         }
       }
     } catch (e) {
-      print('Error accessing Downloads directory: $e');
+      print('Error accessing models directory: $e');
     }
+  }
+
+  /// Get the chat models directory from external storage
+  Future<Directory> get chatModelsDirectory async {
+    final chatModelsDir = Directory(AppConstants.chatModelDir);
+    if (!await chatModelsDir.exists()) {
+      await chatModelsDir.create(recursive: true);
+    }
+    return chatModelsDir;
+  }
+
+  /// Check if a file is a valid GGUF model
+  Future<bool> isValidGGUFModel(String modelPath) async {
+    try {
+      final file = File(modelPath);
+      if (!await file.exists()) {
+        return false;
+      }
+
+      // Check file size (should be at least 1MB for a real model)
+      final size = await file.length();
+      if (size < 1000000) {
+        return false;
+      }
+
+      // Check GGUF magic bytes
+      final bytes = await file.openRead(0, 4).first;
+      final magic = String.fromCharCodes(bytes);
+      return magic == 'GGUF';
+    } catch (e) {
+      print('Error validating GGUF model: $e');
+      return false;
+    }
+  }
+
+  /// Check if model exists in the chat models directory
+  Future<bool> get isChatModelAvailable async {
+    final chatModelsDir = await chatModelsDirectory;
+    final modelPath = '${chatModelsDir.path}/${AppConstants.chatModelName}';
+    return await isValidGGUFModel(modelPath);
   }
 
   /// Get model info

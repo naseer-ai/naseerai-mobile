@@ -104,7 +104,7 @@ class GgufModelService {
     if (lowerPrompt.contains('hello') ||
         lowerPrompt.contains('hi ') ||
         lowerPrompt.startsWith('hi')) {
-      return "Hello! I'm NaseerAI, powered by $modelType. How can I help you today?";
+      return "Hello! I'm NaseerAI, your offline AI assistant powered by $modelType. How can I help you today?";
     }
 
     if (lowerPrompt.contains('how are you')) {
@@ -112,7 +112,11 @@ class GgufModelService {
     }
 
     if (lowerPrompt.contains('what') && lowerPrompt.contains('name')) {
-      return "I'm NaseerAI, an AI assistant powered by $modelType.";
+      return "I'm NaseerAI, your offline AI assistant powered by $modelType.";
+    }
+    
+    if (lowerPrompt.contains('who are you') || lowerPrompt.contains('who r you')) {
+      return "I'm NaseerAI, your offline AI assistant. I'm designed to provide help and information without requiring an internet connection. I'm powered by $modelType and can assist with various questions and tasks.";
     }
 
     // Time/Date questions
@@ -127,7 +131,7 @@ class GgufModelService {
     }
 
     // Default response when model can't generate proper responses
-    return "الله أعلم\n\nMay Allah's peace and blessings be upon you. I'm here to assist you with guidance and information. For more comprehensive emergency support and specialized knowledge, please check the Capsules section where additional resources are available.\n\nHow may I help you today, إن شاء الله?";
+    return "السلام عليكم\n\nI'm NaseerAI, your offline AI assistant. I'm here to provide guidance and information without needing an internet connection. For more comprehensive emergency support and specialized knowledge, please check the Capsules section where additional resources are available.\n\nHow may I help you today, إن شاء الله?";
   }
 
   static String _tryBasicMath(String prompt) {

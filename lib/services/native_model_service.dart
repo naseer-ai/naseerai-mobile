@@ -194,7 +194,7 @@ class NativeModelService {
 
     // Simple greeting
     if (lowerPrompt.contains('hello') || lowerPrompt.contains('hi ') || lowerPrompt.startsWith('hi')) {
-      return "Hello! I'm NaseerAI. I can help with basic questions and calculations. What would you like to know?";
+      return "Hello! I'm NaseerAI, your offline AI assistant. I can help with basic questions and calculations. What would you like to know?";
     }
 
     if (lowerPrompt.contains('how are you')) {
@@ -202,7 +202,11 @@ class NativeModelService {
     }
 
     if (lowerPrompt.contains('what') && lowerPrompt.contains('name')) {
-      return "I'm NaseerAI, your AI assistant.";
+      return "I'm NaseerAI, your offline AI assistant.";
+    }
+    
+    if (lowerPrompt.contains('who are you') || lowerPrompt.contains('who r you')) {
+      return "I'm NaseerAI, your offline AI assistant. I'm designed to provide help and information without requiring an internet connection. I can assist with various questions, calculations, and provide guidance on many topics.";
     }
 
     // Time/Date questions

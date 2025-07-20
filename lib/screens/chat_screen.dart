@@ -3,10 +3,13 @@ import 'package:flutter/services.dart';
 import 'dart:async';
 import '../models/chat_message.dart';
 import '../services/chat_service.dart';
+import '../services/model_manager.dart';
 import '../widgets/chat_message_widget.dart';
 import '../widgets/chat_input_widget.dart';
 import '../widgets/suggestions_widget.dart';
 import '../widgets/typing_indicator.dart';
+import '../widgets/model_install_dialog.dart';
+import '../widgets/available_capsules_widget.dart';
 
 class ChatScreen extends StatefulWidget {
   const ChatScreen({super.key});
@@ -23,9 +26,11 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
   String? _sessionId;
   List<ChatMessage> _messages = [];
   List<String> _suggestions = [];
+  List<String> _availableCapsules = [];
   bool _isLoading = false;
   bool _isTyping = false;
   bool _suggestionsHidden = false;
+  bool _capsulesHidden = false;
   StreamSubscription<ChatMessage>? _messageSubscription;
 
   @override
@@ -40,6 +45,34 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
     });
 
     try {
+      // Check if model is available first
+      final isModelAvailable = await ModelManager.instance.isChatModelAvailable;
+
+      if (!isModelAvailable) {
+        setState(() {
+          _isLoading = false;
+        });
+
+        // Show model install dialog
+        final shouldInstall = await _showModelInstallDialog();
+        if (!shouldInstall) {
+          // User cancelled, show error state
+          _showErrorSnackBar('AI model is required to start chatting');
+          return;
+        }
+
+        // Check again after potential installation
+        final isNowAvailable = await ModelManager.instance.isChatModelAvailable;
+        if (!isNowAvailable) {
+          _showErrorSnackBar('Model installation failed or was cancelled');
+          return;
+        }
+
+        setState(() {
+          _isLoading = true;
+        });
+      }
+
       // Initialize chat service
       await _chatService.initialize();
 
@@ -52,6 +85,9 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
 
       // Get initial suggestions
       _suggestions = _chatService.getSuggestions(_sessionId!);
+
+      // Get available capsules
+      _availableCapsules = _chatService.getAvailableCapsules();
 
       // Add welcome message
       await _sendWelcomeMessage();
@@ -89,8 +125,9 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
         _messages.add(message);
       }
 
-      // Update typing state
-      _isTyping = _messages.any((msg) => msg.isStreaming);
+      // Update typing state - only show typing indicator during actual streaming with content
+      _isTyping = _messages.any((msg) =>
+          msg.isStreaming && msg.isAssistant && msg.content.trim().isNotEmpty);
 
       // Update suggestions after assistant response
       if (message.isAssistant && message.isCompleted) {
@@ -141,6 +178,18 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
     });
   }
 
+  void _hideCapsules() {
+    setState(() {
+      _capsulesHidden = true;
+    });
+  }
+
+  void _showCapsules() {
+    setState(() {
+      _capsulesHidden = false;
+    });
+  }
+
   void _scrollToBottom() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (_scrollController.hasClients) {
@@ -163,6 +212,15 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
         ),
       );
     }
+  }
+
+  Future<bool> _showModelInstallDialog() async {
+    final result = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => const ModelInstallDialog(),
+    );
+    return result ?? false;
   }
 
   Future<void> _copyMessage(String content) async {
@@ -296,16 +354,29 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
                     onClose: _hideSuggestions,
                   ),
 
+                // Available Capsules
+                if (_availableCapsules.isNotEmpty &&
+                    !_isTyping &&
+                    !_capsulesHidden)
+                  AvailableCapsulesWidget(
+                    availableCapsules: _availableCapsules,
+                    onClose: _hideCapsules,
+                  ),
+
                 // Input area
                 ChatInputWidget(
                   controller: _inputController,
                   onSend: _sendMessage,
                   onStop: _stopStreaming,
                   onShowSuggestions: _showSuggestions,
+                  onShowCapsules: _showCapsules,
                   enabled: !_isTyping,
                   isStreaming: _isTyping,
                   showSuggestionsButton: _suggestions.isNotEmpty &&
                       _suggestionsHidden &&
+                      !_isTyping,
+                  showCapsulesButton: _availableCapsules.isNotEmpty &&
+                      _capsulesHidden &&
                       !_isTyping,
                 ),
               ],
@@ -358,11 +429,11 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
   void _showAboutDialog() {
     showDialog(
       context: context,
-      builder: (context) => AboutDialog(
+      builder: (context) => const AboutDialog(
         applicationName: 'NaseerAI Chat',
         applicationVersion: '1.0.0',
-        applicationIcon: const Icon(Icons.chat, size: 48),
-        children: const [
+        applicationIcon: Icon(Icons.chat, size: 48),
+        children: [
           Text(
             'An offline AI chatbot powered by Qwen2 1.5B Instruct model. '
             'No internet connection required - all processing happens on your device.',

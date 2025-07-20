@@ -25,9 +25,8 @@ class ChatMessageWidget extends StatelessWidget {
         right: isUser ? 0 : 48,
       ),
       child: Column(
-        crossAxisAlignment: isUser 
-            ? CrossAxisAlignment.end 
-            : CrossAxisAlignment.start,
+        crossAxisAlignment:
+            isUser ? CrossAxisAlignment.end : CrossAxisAlignment.start,
         children: [
           // Message bubble
           GestureDetector(
@@ -58,7 +57,7 @@ class ChatMessageWidget extends StatelessWidget {
                 children: [
                   // Message content
                   _buildMessageContent(),
-                  
+
                   // Streaming indicator
                   if (message.isStreaming)
                     Container(
@@ -72,7 +71,8 @@ class ChatMessageWidget extends StatelessWidget {
                             child: CircularProgressIndicator(
                               strokeWidth: 2,
                               valueColor: AlwaysStoppedAnimation<Color>(
-                                _getTextColor(isUser, isSystem).withValues(alpha: 0.7),
+                                _getTextColor(isUser, isSystem)
+                                    .withValues(alpha: 0.7),
                               ),
                             ),
                           ),
@@ -80,7 +80,8 @@ class ChatMessageWidget extends StatelessWidget {
                           Text(
                             'Typing...',
                             style: TextStyle(
-                              color: _getTextColor(isUser, isSystem).withValues(alpha: 0.7),
+                              color: _getTextColor(isUser, isSystem)
+                                  .withValues(alpha: 0.7),
                               fontSize: 12,
                               fontStyle: FontStyle.italic,
                             ),
@@ -88,7 +89,7 @@ class ChatMessageWidget extends StatelessWidget {
                         ],
                       ),
                     ),
-                  
+
                   // Error indicator
                   if (message.hasError)
                     Container(
@@ -116,7 +117,7 @@ class ChatMessageWidget extends StatelessWidget {
               ),
             ),
           ),
-          
+
           // Message metadata
           Padding(
             padding: const EdgeInsets.only(top: 4, left: 12, right: 12),
@@ -127,12 +128,15 @@ class ChatMessageWidget extends StatelessWidget {
                 Text(
                   _formatTime(message.timestamp),
                   style: theme.textTheme.bodySmall?.copyWith(
-                    color: theme.textTheme.bodySmall?.color?.withValues(alpha: 0.6),
+                    color: theme.textTheme.bodySmall?.color
+                        ?.withValues(alpha: 0.6),
                   ),
                 ),
-                
+
                 // Copy button for assistant messages
-                if (message.isAssistant && message.isCompleted && onCopy != null)
+                if (message.isAssistant &&
+                    message.isCompleted &&
+                    onCopy != null)
                   Padding(
                     padding: const EdgeInsets.only(left: 8),
                     child: GestureDetector(
@@ -140,11 +144,12 @@ class ChatMessageWidget extends StatelessWidget {
                       child: Icon(
                         Icons.copy,
                         size: 16,
-                        color: theme.textTheme.bodySmall?.color?.withValues(alpha: 0.6),
+                        color: theme.textTheme.bodySmall?.color
+                            ?.withValues(alpha: 0.6),
                       ),
                     ),
                   ),
-                
+
                 // Status indicator
                 if (message.isUser)
                   Padding(
@@ -166,10 +171,10 @@ class ChatMessageWidget extends StatelessWidget {
   Widget _buildMessageContent() {
     final isUser = message.isUser;
     final isSystem = message.isSystem;
-    
+
     if (message.isAssistant) {
       final parsed = ResponseParser.parse(message.content);
-      
+
       if (parsed.isStructured) {
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -195,7 +200,7 @@ class ChatMessageWidget extends StatelessWidget {
                         ),
                         const SizedBox(width: 8),
                         Text(
-                          'Quick Summary',
+                          'Source',
                           style: TextStyle(
                             fontWeight: FontWeight.bold,
                             color: Colors.blue[700],
@@ -263,7 +268,8 @@ class ChatMessageWidget extends StatelessWidget {
                 decoration: BoxDecoration(
                   color: Colors.orange.withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: Colors.orange.withValues(alpha: 0.3)),
+                  border:
+                      Border.all(color: Colors.orange.withValues(alpha: 0.3)),
                 ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -303,7 +309,7 @@ class ChatMessageWidget extends StatelessWidget {
         );
       }
     }
-    
+
     // Default message display for non-structured content
     return SelectableText(
       message.content,
@@ -365,7 +371,7 @@ class ChatMessageWidget extends StatelessWidget {
   String _formatTime(DateTime timestamp) {
     final now = DateTime.now();
     final diff = now.difference(timestamp);
-    
+
     if (diff.inDays > 0) {
       return '${diff.inDays}d ago';
     } else if (diff.inHours > 0) {
