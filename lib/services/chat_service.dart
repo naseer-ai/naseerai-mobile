@@ -22,11 +22,11 @@ class ChatService {
   AIModel? _currentModel;
   bool _isModelLoaded = false;
   bool _useNativeModel = false;
-  
+
   // Performance optimization: Keep model loaded
   bool _modelPersistentlyLoaded = false;
   String? _loadedModelPath;
-  
+
   // Timeout configuration
   static const Duration _responseTimeout = Duration(seconds: 30);
   static const Duration _modelLoadTimeout = Duration(seconds: 60);
@@ -48,7 +48,7 @@ class ChatService {
 
       // Auto-detect and load model in background to prevent ANR
       _initializeModelInBackground();
-      
+
       print('📋 ChatService initialized - model loading in background');
     } catch (e) {
       print('⚠️ ChatService initialization error: $e');
@@ -64,7 +64,7 @@ class ChatService {
       try {
         // Add delay to let UI render first
         await Future.delayed(const Duration(milliseconds: 100));
-        
+
         final modelLoaded = await _nativeModelService.autoLoadBestModel();
         _isModelLoaded = modelLoaded;
         _useNativeModel = modelLoaded;
@@ -252,7 +252,8 @@ class ChatService {
         // Use optimized response generation with timeout
         fullResponse = await _generateOptimizedResponse(userMessage).timeout(
           _responseTimeout,
-          onTimeout: () => "Response timed out after ${_responseTimeout.inSeconds} seconds. Please try a shorter message.",
+          onTimeout: () =>
+              "Response timed out after ${_responseTimeout.inSeconds} seconds. Please try a shorter message.",
         );
       } catch (e) {
         print('Error generating response: $e');
@@ -266,7 +267,6 @@ class ChatService {
 
       // Simulate streaming by breaking response into chunks
       await _streamResponse(sessionId, aiMessageId, fullResponse);
-
     } catch (e) {
       print('Error in _generateStreamingResponse: $e');
       // Send error message
@@ -287,33 +287,45 @@ class ChatService {
     try {
       // Step 1: Search capsules for relevant knowledge FIRST
       print('🔍 Searching local knowledge capsules for: "$userMessage"');
-      final capsuleResults = await _capsuleSearchService.search(userMessage, maxResults: 5);
-      
+      final capsuleResults =
+          await _capsuleSearchService.search(userMessage, maxResults: 5);
+
       print('📊 Search results: ${capsuleResults.results.length} total');
       for (int i = 0; i < capsuleResults.results.length; i++) {
         final result = capsuleResults.results[i];
         final cleanedContent = _cleanTextContent(result.content);
-        final contentPreview = cleanedContent.length > 100 ? cleanedContent.substring(0, 100) : cleanedContent;
-        print('  [$i] Similarity: ${(result.similarity * 100).toStringAsFixed(1)}% - $contentPreview...');
+        final contentPreview = cleanedContent.length > 100
+            ? cleanedContent.substring(0, 100)
+            : cleanedContent;
+        print(
+            '  [$i] Similarity: ${(result.similarity * 100).toStringAsFixed(1)}% - $contentPreview...');
       }
 
       // Only use capsule response if we have highly relevant results
-      if (capsuleResults.hasResults && _hasHighlyRelevantResults(capsuleResults)) {
-        print('🔄 Found highly relevant capsule data, using capsule-based response...');
-        final capsuleResponse = await _addEmergencyContextWithCapsules(userMessage, capsuleResults);
-        
+      if (capsuleResults.hasResults &&
+          _hasHighlyRelevantResults(capsuleResults)) {
+        print(
+            '🔄 Found highly relevant capsule data, using capsule-based response...');
+        final capsuleResponse =
+            await _addEmergencyContextWithCapsules(userMessage, capsuleResults);
+
         // If capsule response is substantial, use it
-        if (capsuleResponse.length > 100 && !capsuleResponse.contains("I don't have specific information")) {
-          print('✅ Using capsule-based response (${capsuleResponse.length} chars)');
+        if (capsuleResponse.length > 100 &&
+            !capsuleResponse.contains("I don't have specific information")) {
+          print(
+              '✅ Using capsule-based response (${capsuleResponse.length} chars)');
           return capsuleResponse;
         } else {
-          final previewLength = capsuleResponse.length > 100 ? 100 : capsuleResponse.length;
-          print('⚠️ Capsule response not substantial enough: ${capsuleResponse.substring(0, previewLength)}...');
+          final previewLength =
+              capsuleResponse.length > 100 ? 100 : capsuleResponse.length;
+          print(
+              '⚠️ Capsule response not substantial enough: ${capsuleResponse.substring(0, previewLength)}...');
         }
       } else {
-        print('📊 Capsule results not highly relevant. HasResults: ${capsuleResults.hasResults}, HighlyRelevant: ${_hasHighlyRelevantResults(capsuleResults)}');
+        print(
+            '📊 Capsule results not highly relevant. HasResults: ${capsuleResults.hasResults}, HighlyRelevant: ${_hasHighlyRelevantResults(capsuleResults)}');
       }
-      
+
       // Step 2: Ensure model is loaded and ready
       if (!_modelPersistentlyLoaded) {
         await _loadAndPersistModel();
@@ -323,19 +335,23 @@ class ChatService {
       String enhancedPrompt = userMessage;
       if (capsuleResults.hasResults && _hasRelevantResults(capsuleResults)) {
         enhancedPrompt = _createEnhancedPrompt(userMessage, capsuleResults);
-        print('📝 Enhanced prompt with ${capsuleResults.results.length} relevant knowledge pieces');
+        print(
+            '📝 Enhanced prompt with ${capsuleResults.results.length} relevant knowledge pieces');
       }
 
       // Step 4: Try to use the native model service with enhanced prompt
       print('🤖 Attempting response generation with native model service...');
-      final response = await _nativeModelService.generateResponse(enhancedPrompt);
-      
+      final response =
+          await _nativeModelService.generateResponse(enhancedPrompt);
+
       // Check if we got a real response (not a fallback message)
-      if (response.isNotEmpty && 
-          !response.contains('having trouble generating') && 
+      if (response.isNotEmpty &&
+          !response.contains('having trouble generating') &&
           !response.contains('install knowledge capsules') &&
-          !response.contains('For true emergencies, please contact local emergency services') &&
-          !response.contains('السلام عليكم') && // Arabic greeting indicates fallback
+          !response.contains(
+              'For true emergencies, please contact local emergency services') &&
+          !response
+              .contains('السلام عليكم') && // Arabic greeting indicates fallback
           !response.contains('بسم الله') && // Basmala indicates fallback
           !response.contains('check the Capsules section') &&
           !response.contains('visit the Capsules section') &&
@@ -346,13 +362,15 @@ class ChatService {
       // Step 5: If model fails but we have capsules, use capsule-only response
       if (capsuleResults.hasResults) {
         print('📚 Falling back to capsule-only response');
-        return await _addEmergencyContextWithCapsules(userMessage, capsuleResults);
+        return await _addEmergencyContextWithCapsules(
+            userMessage, capsuleResults);
       }
 
       // Step 6: If we got a fallback, try direct llama service
       if (_isModelLoaded && _useNativeModel) {
         print('🦙 Trying direct LlamaService response generation...');
-        final llamaResponse = await _nativeModelService.llamaService.generateResponse(enhancedPrompt);
+        final llamaResponse = await _nativeModelService.llamaService
+            .generateResponse(enhancedPrompt);
         if (llamaResponse.isNotEmpty && !llamaResponse.contains('Error:')) {
           return llamaResponse;
         }
@@ -367,7 +385,8 @@ class ChatService {
   }
 
   /// Create enhanced prompt by combining user message with relevant capsule context
-  String _createEnhancedPrompt(String userMessage, CapsuleSearchResult capsuleResults) {
+  String _createEnhancedPrompt(
+      String userMessage, CapsuleSearchResult capsuleResults) {
     if (capsuleResults.results.isEmpty) {
       return userMessage;
     }
@@ -375,7 +394,8 @@ class ChatService {
     // Extract top relevant information
     final relevantInfo = <String>[];
     for (final result in capsuleResults.results) {
-      if (result.similarity > 0.25 && relevantInfo.length < 3) { // Reasonable threshold for prompt enhancement
+      if (result.similarity > 0.25 && relevantInfo.length < 3) {
+        // Reasonable threshold for prompt enhancement
         final cleanedContent = _cleanTextContent(result.content);
         if (cleanedContent.isNotEmpty) {
           relevantInfo.add(cleanedContent);
@@ -404,15 +424,16 @@ Please provide a helpful response based on the context above and your knowledge.
       if (_modelPersistentlyLoaded) return;
 
       print('🔄 Loading model for persistent use...');
-      
+
       // Get available models
       final availableModels = await _getAvailableModelsWithCorrectPath();
-      
+
       if (availableModels.isEmpty) {
         // Try to copy model from host system
         final copySuccess = await _copyModelFromHost();
         if (copySuccess) {
-          final availableModelsAfterCopy = await _getAvailableModelsWithCorrectPath();
+          final availableModelsAfterCopy =
+              await _getAvailableModelsWithCorrectPath();
           if (availableModelsAfterCopy.isNotEmpty) {
             availableModels.addAll(availableModelsAfterCopy);
           }
@@ -423,11 +444,13 @@ Please provide a helpful response based on the context above and your knowledge.
         // Load the first available model with timeout
         final modelPath = availableModels.first;
         _loadedModelPath = modelPath;
-        
-        final loadSuccess = await _nativeModelService.loadModel(modelPath).timeout(
+
+        final loadSuccess =
+            await _nativeModelService.loadModel(modelPath).timeout(
           _modelLoadTimeout,
           onTimeout: () {
-            print('Model loading timed out after ${_modelLoadTimeout.inSeconds} seconds');
+            print(
+                'Model loading timed out after ${_modelLoadTimeout.inSeconds} seconds');
             return false;
           },
         );
@@ -451,10 +474,11 @@ Please provide a helpful response based on the context above and your knowledge.
     try {
       // Search capsules for relevant knowledge
       final capsuleResults = await _capsuleSearchService.search(userMessage);
-      
+
       if (capsuleResults.hasResults && _hasRelevantResults(capsuleResults)) {
         // Use capsule knowledge for response
-        return await _addEmergencyContextWithCapsules(userMessage, capsuleResults);
+        return await _addEmergencyContextWithCapsules(
+            userMessage, capsuleResults);
       }
 
       // Use intelligent pattern-based responses from native model service
@@ -466,7 +490,8 @@ Please provide a helpful response based on the context above and your knowledge.
   }
 
   /// Stream response by breaking it into chunks for better UX (ANR-safe)
-  Future<void> _streamResponse(String sessionId, String messageId, String fullResponse) async {
+  Future<void> _streamResponse(
+      String sessionId, String messageId, String fullResponse) async {
     try {
       final session = _sessions[sessionId];
       if (session == null) return;
@@ -476,10 +501,10 @@ Please provide a helpful response based on the context above and your knowledge.
         // Break response into words for streaming effect
         final words = fullResponse.split(' ');
         String currentContent = '';
-        
+
         // Process in smaller batches to prevent ANR
         const batchSize = 5; // Process 5 words at a time
-        
+
         for (int i = 0; i < words.length; i += batchSize) {
           // Check if streaming was cancelled
           if (_streamingCancellation[sessionId] == true) {
@@ -487,7 +512,8 @@ Please provide a helpful response based on the context above and your knowledge.
           }
 
           // Process batch of words
-          final endIndex = (i + batchSize > words.length) ? words.length : i + batchSize;
+          final endIndex =
+              (i + batchSize > words.length) ? words.length : i + batchSize;
           for (int j = i; j < endIndex; j++) {
             currentContent += words[j];
             if (j < words.length - 1) currentContent += ' ';
@@ -499,10 +525,13 @@ Please provide a helpful response based on the context above and your knowledge.
             content: currentContent,
             type: MessageType.assistant,
             timestamp: DateTime.now(),
-            status: endIndex == words.length ? MessageStatus.completed : MessageStatus.streaming,
+            status: endIndex == words.length
+                ? MessageStatus.completed
+                : MessageStatus.streaming,
           );
 
-          _sessions[sessionId] = session.updateMessage(messageId, updatedMessage);
+          _sessions[sessionId] =
+              session.updateMessage(messageId, updatedMessage);
           _streamControllers[sessionId]?.add(updatedMessage);
 
           // Small delay between batches to allow UI updates
@@ -523,7 +552,7 @@ Please provide a helpful response based on the context above and your knowledge.
       _nativeModelService.unloadModel();
       _modelPersistentlyLoaded = false;
     }
-    
+
     // Close all stream controllers
     for (final controller in _streamControllers.values) {
       controller.close();
@@ -544,10 +573,11 @@ Please provide a helpful response based on the context above and your knowledge.
   // Check if capsule search results are relevant enough for enhancement
   bool _hasRelevantResults(CapsuleSearchResult capsuleResults) {
     if (capsuleResults.results.isEmpty) return false;
-    
+
     // Check if any result has a reasonable similarity score
     for (final result in capsuleResults.results) {
-      if (result.similarity > 0.2) { // Moderate threshold for enhancement
+      if (result.similarity > 0.2) {
+        // Moderate threshold for enhancement
         return true;
       }
     }
@@ -557,21 +587,23 @@ Please provide a helpful response based on the context above and your knowledge.
   // Check if capsule search results are highly relevant (for direct capsule response)
   bool _hasHighlyRelevantResults(CapsuleSearchResult capsuleResults) {
     if (capsuleResults.results.isEmpty) return false;
-    
+
     // Require higher similarity AND keyword relevance for direct capsule responses
     int highlyRelevantCount = 0;
     for (final result in capsuleResults.results) {
-      if (result.similarity > 0.4) { // High similarity threshold
+      if (result.similarity > 0.4) {
+        // High similarity threshold
         highlyRelevantCount++;
       }
     }
-    
+
     // Need at least 2 highly relevant results to use capsule-only response
     return highlyRelevantCount >= 2;
   }
 
   /// Generate emergency response using capsule knowledge
-  Future<String> _addEmergencyContextWithCapsules(String userMessage, CapsuleSearchResult capsuleResults) async {
+  Future<String> _addEmergencyContextWithCapsules(
+      String userMessage, CapsuleSearchResult capsuleResults) async {
     try {
       if (capsuleResults.results.isEmpty) {
         return "I don't have specific information about that in my local knowledge base.";
@@ -580,7 +612,8 @@ Please provide a helpful response based on the context above and your knowledge.
       // Extract relevant context from search results
       final relevantInfo = <String>[];
       for (final result in capsuleResults.results) {
-        if (result.similarity > 0.3) { // Higher threshold for emergency context
+        if (result.similarity > 0.3) {
+          // Higher threshold for emergency context
           // Clean the content to ensure proper formatting
           final cleanedContent = _cleanTextContent(result.content);
           if (cleanedContent.isNotEmpty) {
@@ -595,7 +628,7 @@ Please provide a helpful response based on the context above and your knowledge.
 
       // Create emergency-focused response using CLAUDE.md format
       final contextualInfo = relevantInfo.take(3).join('\n\n'); // Top 3 results
-      
+
       return '''
 <response>
 <summary>Emergency information from local knowledge base</summary>
@@ -610,7 +643,8 @@ This information is stored locally and doesn't require internet access.
 This response was generated using pre-loaded emergency data capsules designed for offline use during crisis situations.
 </additional_info>
 </response>
-      '''.trim();
+      '''
+          .trim();
     } catch (e) {
       print('Error generating capsule-based response: $e');
       return "I encountered an error accessing my local knowledge base. Please try rephrasing your question.";
@@ -629,19 +663,22 @@ This response was generated using pre-loaded emergency data capsules designed fo
   /// Clean text content to ensure proper formatting
   String _cleanTextContent(String content) {
     if (content.isEmpty) return content;
-    
+
     // Clean up the text by removing excessive newlines and spaces
     String cleaned = content
-        .replaceAll(RegExp(r'\n\s*'), ' ')  // Replace newlines with spaces
-        .replaceAll(RegExp(r'\s+'), ' ')    // Replace multiple spaces with single space
+        .replaceAll(RegExp(r'\n\s*'), ' ') // Replace newlines with spaces
+        .replaceAll(
+            RegExp(r'\s+'), ' ') // Replace multiple spaces with single space
         .trim();
-    
+
     // Additional cleaning for better readability
     cleaned = cleaned
-        .replaceAll(RegExp(r'\s+([.,!?;:])'), r'$1')  // Fix spacing before punctuation
-        .replaceAll(RegExp(r'([.,!?;:])\s*'), r'$1 ')  // Ensure space after punctuation
+        .replaceAll(
+            RegExp(r'\s+([.,!?;:])'), r'$1') // Fix spacing before punctuation
+        .replaceAll(
+            RegExp(r'([.,!?;:])\s*'), r'$1 ') // Ensure space after punctuation
         .trim();
-    
+
     return cleaned;
   }
 
@@ -656,11 +693,11 @@ This response was generated using pre-loaded emergency data capsules designed fo
   // Get suggestions for the user
   List<String> getSuggestions(String sessionId) {
     return [
-      "What can you help me with?",
-      "Tell me about emergency procedures",
-      "How can I conserve resources?",
-      "What should I do in an emergency?",
+      "What are the basic steps of first aid?",
+      "How do I treat a minor burn?",
+      "What should I do if someone faints?",
+      "How can I stop minor bleeding?",
+      "What items should be in a first aid kit?",
     ];
   }
 }
-

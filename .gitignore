@@ -189,3 +189,4 @@ large_models/
 
 # Claude generated files (optional)
 .claude/
+files/
