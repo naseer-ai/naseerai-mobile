@@ -26,6 +26,7 @@ flutter:
   assets:
     - assets/images/
     - capsules/
+    - android/app/src/main/assets/capsules/
 
 # Development Commands (run from project root)
 # make android  - Run on Android emulator/device with auto-detection

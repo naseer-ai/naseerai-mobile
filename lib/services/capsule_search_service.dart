@@ -30,19 +30,54 @@ class CapsuleSearchService {
 
   Future<void> _loadAllEmbeddings() async {
     try {
+      print('📦 Loading capsule embeddings...');
+      
       // Get list of files in capsules directory
       final manifestContent = await rootBundle.loadString('AssetManifest.json');
       final Map<String, dynamic> manifestMap = json.decode(manifestContent);
       
+      print('🔍 Scanning asset manifest for capsule files...');
+      final allKeys = manifestMap.keys.toList();
+      print('📋 Found ${allKeys.length} total assets');
+      
       final capsuleFiles = manifestMap.keys
           .where((String key) => key.startsWith(_capsulesPath) && key.endsWith('.json'))
           .toList();
+          
+      // Also check for android assets path
+      final androidCapsuleFiles = manifestMap.keys
+          .where((String key) => key.contains('capsules') && key.endsWith('.json'))
+          .toList();
 
-      for (final filePath in capsuleFiles) {
+      print('🎯 Found ${capsuleFiles.length} capsule files at $_capsulesPath');
+      print('🎯 Found ${androidCapsuleFiles.length} capsule files with "capsules" in path');
+      
+      if (capsuleFiles.isEmpty && androidCapsuleFiles.isEmpty) {
+        print('⚠️ No capsule files found! Available asset keys containing "capsule" or "json":');
+        final relevantKeys = allKeys.where((key) => 
+          key.toLowerCase().contains('capsule') || 
+          key.toLowerCase().contains('json') ||
+          key.toLowerCase().contains('embedding')
+        ).toList();
+        for (final key in relevantKeys) {
+          print('  - $key');
+        }
+      }
+
+      // Load all found capsule files
+      final allCapsuleFiles = [...capsuleFiles, ...androidCapsuleFiles];
+      final uniqueFiles = allCapsuleFiles.toSet().toList(); // Remove duplicates
+      
+      for (final filePath in uniqueFiles) {
+        print('📄 Loading capsule file: $filePath');
         await _loadEmbeddingFile(filePath);
       }
+      
+      if (uniqueFiles.isEmpty) {
+        print('❌ No capsule embedding files found to load');
+      }
     } catch (e) {
-      print('Error loading embeddings: $e');
+      print('❌ Error loading embeddings: $e');
     }
   }
 
@@ -65,11 +100,17 @@ class CapsuleSearchService {
       
       for (int i = 0; i < embeddings.length; i++) {
         final embedding = List<double>.from(embeddings[i].cast<double>());
-        final sentence = sentences[i].toString().trim();
+        final rawSentence = sentences[i].toString().trim();
         
-        if (sentence.isNotEmpty) {
+        // Clean up the sentence by removing excessive newlines and spaces
+        final cleanedSentence = rawSentence
+            .replaceAll(RegExp(r'\n\s*'), ' ')  // Replace newlines with spaces
+            .replaceAll(RegExp(r'\s+'), ' ')    // Replace multiple spaces with single space
+            .trim();
+        
+        if (cleanedSentence.isNotEmpty && cleanedSentence.split(' ').length > 3) { // Only keep sentences with more than 3 words
           processedEmbeddings.add({
-            'content': sentence,
+            'content': cleanedSentence,
             'embedding': embedding,
             'metadata': {
               'source': fileName,

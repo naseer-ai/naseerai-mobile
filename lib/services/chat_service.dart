@@ -286,8 +286,28 @@ class ChatService {
   Future<String> _generateOptimizedResponse(String userMessage) async {
     try {
       // Step 1: Search capsules for relevant knowledge FIRST
-      print('Searching local knowledge capsules...');
-      final capsuleResults = await _capsuleSearchService.search(userMessage);
+      print('🔍 Searching local knowledge capsules for: "$userMessage"');
+      final capsuleResults = await _capsuleSearchService.search(userMessage, maxResults: 5);
+      
+      print('📊 Search results: ${capsuleResults.results.length} total');
+      for (int i = 0; i < capsuleResults.results.length; i++) {
+        final result = capsuleResults.results[i];
+        final cleanedContent = _cleanTextContent(result.content);
+        final contentPreview = cleanedContent.length > 100 ? cleanedContent.substring(0, 100) : cleanedContent;
+        print('  [$i] Similarity: ${(result.similarity * 100).toStringAsFixed(1)}% - $contentPreview...');
+      }
+
+      // Only use capsule response if we have highly relevant results
+      if (capsuleResults.hasResults && _hasHighlyRelevantResults(capsuleResults)) {
+        print('🔄 Found highly relevant capsule data, using capsule-based response...');
+        final capsuleResponse = await _addEmergencyContextWithCapsules(userMessage, capsuleResults);
+        
+        // If capsule response is substantial, use it
+        if (capsuleResponse.length > 100 && !capsuleResponse.contains("I don't have specific information")) {
+          print('✅ Using capsule-based response');
+          return capsuleResponse;
+        }
+      }
       
       // Step 2: Ensure model is loaded and ready
       if (!_modelPersistentlyLoaded) {
@@ -298,28 +318,30 @@ class ChatService {
       String enhancedPrompt = userMessage;
       if (capsuleResults.hasResults && _hasRelevantResults(capsuleResults)) {
         enhancedPrompt = _createEnhancedPrompt(userMessage, capsuleResults);
-        print('Enhanced prompt with ${capsuleResults.results.length} relevant knowledge pieces');
+        print('📝 Enhanced prompt with ${capsuleResults.results.length} relevant knowledge pieces');
       }
 
       // Step 4: Try to use the native model service with enhanced prompt
-      print('Attempting response generation with native model service...');
+      print('🤖 Attempting response generation with native model service...');
       final response = await _nativeModelService.generateResponse(enhancedPrompt);
       
       // Check if we got a real response (not a fallback message)
       if (response.isNotEmpty && 
           !response.contains('having trouble generating') && 
-          !response.contains('install knowledge capsules')) {
+          !response.contains('install knowledge capsules') &&
+          !response.contains('For true emergencies, please contact local emergency services')) {
         return response;
       }
 
       // Step 5: If model fails but we have capsules, use capsule-only response
-      if (capsuleResults.hasResults && _hasRelevantResults(capsuleResults)) {
+      if (capsuleResults.hasResults) {
+        print('📚 Falling back to capsule-only response');
         return await _addEmergencyContextWithCapsules(userMessage, capsuleResults);
       }
 
       // Step 6: If we got a fallback, try direct llama service
       if (_isModelLoaded && _useNativeModel) {
-        print('Trying direct LlamaService response generation...');
+        print('🦙 Trying direct LlamaService response generation...');
         final llamaResponse = await _nativeModelService.llamaService.generateResponse(enhancedPrompt);
         if (llamaResponse.isNotEmpty && !llamaResponse.contains('Error:')) {
           return llamaResponse;
@@ -329,7 +351,7 @@ class ChatService {
       // Step 7: Final fallback
       return response; // Return the fallback message
     } catch (e) {
-      print('Error in optimized response generation: $e');
+      print('❌ Error in optimized response generation: $e');
       return await _generateFallbackResponse(userMessage);
     }
   }
@@ -343,8 +365,11 @@ class ChatService {
     // Extract top relevant information
     final relevantInfo = <String>[];
     for (final result in capsuleResults.results) {
-      if (result.similarity > 0.3 && relevantInfo.length < 3) {
-        relevantInfo.add(result.content);
+      if (result.similarity > 0.25 && relevantInfo.length < 3) { // Reasonable threshold for prompt enhancement
+        final cleanedContent = _cleanTextContent(result.content);
+        if (cleanedContent.isNotEmpty) {
+          relevantInfo.add(cleanedContent);
+        }
       }
     }
 
@@ -506,17 +531,33 @@ Please provide a helpful response based on the context above and your knowledge.
     return 'msg_${DateTime.now().millisecondsSinceEpoch}_${Random().nextInt(1000)}';
   }
 
-  // Check if capsule search results are relevant enough
+  // Check if capsule search results are relevant enough for enhancement
   bool _hasRelevantResults(CapsuleSearchResult capsuleResults) {
     if (capsuleResults.results.isEmpty) return false;
     
-    // Check if any result has a good similarity score
+    // Check if any result has a reasonable similarity score
     for (final result in capsuleResults.results) {
-      if (result.similarity > 0.3) {
+      if (result.similarity > 0.2) { // Moderate threshold for enhancement
         return true;
       }
     }
     return false;
+  }
+
+  // Check if capsule search results are highly relevant (for direct capsule response)
+  bool _hasHighlyRelevantResults(CapsuleSearchResult capsuleResults) {
+    if (capsuleResults.results.isEmpty) return false;
+    
+    // Require higher similarity AND keyword relevance for direct capsule responses
+    int highlyRelevantCount = 0;
+    for (final result in capsuleResults.results) {
+      if (result.similarity > 0.4) { // High similarity threshold
+        highlyRelevantCount++;
+      }
+    }
+    
+    // Need at least 2 highly relevant results to use capsule-only response
+    return highlyRelevantCount >= 2;
   }
 
   /// Generate emergency response using capsule knowledge
@@ -529,8 +570,12 @@ Please provide a helpful response based on the context above and your knowledge.
       // Extract relevant context from search results
       final relevantInfo = <String>[];
       for (final result in capsuleResults.results) {
-        if (result.similarity > 0.2) { // Lower threshold for emergency context
-          relevantInfo.add(result.content);
+        if (result.similarity > 0.3) { // Higher threshold for emergency context
+          // Clean the content to ensure proper formatting
+          final cleanedContent = _cleanTextContent(result.content);
+          if (cleanedContent.isNotEmpty) {
+            relevantInfo.add(cleanedContent);
+          }
         }
       }
 
@@ -545,9 +590,9 @@ Please provide a helpful response based on the context above and your knowledge.
 <response>
 <summary>Emergency information from local knowledge base</summary>
 <detailed_answer>
-Based on your question about "${userMessage}", here's relevant information from my offline knowledge:
+Based on your question about "$userMessage", here's relevant information from my offline knowledge:
 
-${contextualInfo}
+$contextualInfo
 
 This information is stored locally and doesn't require internet access.
 </detailed_answer>
@@ -569,6 +614,25 @@ This response was generated using pre-loaded emergency data capsules designed fo
   Future<bool> _copyModelFromHost() async {
     // Simple placeholder - in real implementation this would copy models
     return false;
+  }
+
+  /// Clean text content to ensure proper formatting
+  String _cleanTextContent(String content) {
+    if (content.isEmpty) return content;
+    
+    // Clean up the text by removing excessive newlines and spaces
+    String cleaned = content
+        .replaceAll(RegExp(r'\n\s*'), ' ')  // Replace newlines with spaces
+        .replaceAll(RegExp(r'\s+'), ' ')    // Replace multiple spaces with single space
+        .trim();
+    
+    // Additional cleaning for better readability
+    cleaned = cleaned
+        .replaceAll(RegExp(r'\s+([.,!?;:])'), r'$1')  // Fix spacing before punctuation
+        .replaceAll(RegExp(r'([.,!?;:])\s*'), r'$1 ')  // Ensure space after punctuation
+        .trim();
+    
+    return cleaned;
   }
 
   // Delete a session
