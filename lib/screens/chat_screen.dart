@@ -9,6 +9,7 @@ import '../widgets/chat_input_widget.dart';
 import '../widgets/suggestions_widget.dart';
 import '../widgets/typing_indicator.dart';
 import '../widgets/model_install_dialog.dart';
+import '../widgets/available_capsules_widget.dart';
 
 class ChatScreen extends StatefulWidget {
   const ChatScreen({super.key});
@@ -25,9 +26,11 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
   String? _sessionId;
   List<ChatMessage> _messages = [];
   List<String> _suggestions = [];
+  List<String> _availableCapsules = [];
   bool _isLoading = false;
   bool _isTyping = false;
   bool _suggestionsHidden = false;
+  bool _capsulesHidden = false;
   StreamSubscription<ChatMessage>? _messageSubscription;
 
   @override
@@ -82,6 +85,9 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
 
       // Get initial suggestions
       _suggestions = _chatService.getSuggestions(_sessionId!);
+
+      // Get available capsules
+      _availableCapsules = _chatService.getAvailableCapsules();
 
       // Add welcome message
       await _sendWelcomeMessage();
@@ -168,6 +174,18 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
   void _showSuggestions() {
     setState(() {
       _suggestionsHidden = false;
+    });
+  }
+
+  void _hideCapsules() {
+    setState(() {
+      _capsulesHidden = true;
+    });
+  }
+
+  void _showCapsules() {
+    setState(() {
+      _capsulesHidden = false;
     });
   }
 
@@ -335,16 +353,29 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
                     onClose: _hideSuggestions,
                   ),
 
+                // Available Capsules
+                if (_availableCapsules.isNotEmpty &&
+                    !_isTyping &&
+                    !_capsulesHidden)
+                  AvailableCapsulesWidget(
+                    availableCapsules: _availableCapsules,
+                    onClose: _hideCapsules,
+                  ),
+
                 // Input area
                 ChatInputWidget(
                   controller: _inputController,
                   onSend: _sendMessage,
                   onStop: _stopStreaming,
                   onShowSuggestions: _showSuggestions,
+                  onShowCapsules: _showCapsules,
                   enabled: !_isTyping,
                   isStreaming: _isTyping,
                   showSuggestionsButton: _suggestions.isNotEmpty &&
                       _suggestionsHidden &&
+                      !_isTyping,
+                  showCapsulesButton: _availableCapsules.isNotEmpty &&
+                      _capsulesHidden &&
                       !_isTyping,
                 ),
               ],
@@ -397,11 +428,11 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
   void _showAboutDialog() {
     showDialog(
       context: context,
-      builder: (context) => AboutDialog(
+      builder: (context) => const AboutDialog(
         applicationName: 'NaseerAI Chat',
         applicationVersion: '1.0.0',
-        applicationIcon: const Icon(Icons.chat, size: 48),
-        children: const [
+        applicationIcon: Icon(Icons.chat, size: 48),
+        children: [
           Text(
             'An offline AI chatbot powered by Qwen2 1.5B Instruct model. '
             'No internet connection required - all processing happens on your device.',

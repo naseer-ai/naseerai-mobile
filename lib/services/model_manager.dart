@@ -155,7 +155,7 @@ class ModelManager {
 
       final downloadsDir = Directory(AppConstants.chatModelDir);
       if (await downloadsDir.exists()) {
-        print('Scanning Downloads directory for GGUF models...');
+        print('Scanning for GGUF models...');
         await for (final entity in downloadsDir.list()) {
           if (entity is File && entity.path.endsWith('.gguf')) {
             print('Found GGUF model: ${entity.path}');
@@ -164,7 +164,7 @@ class ModelManager {
         }
       }
     } catch (e) {
-      print('Error accessing Downloads directory: $e');
+      print('Error accessing models directory: $e');
     }
   }
 

@@ -29,12 +29,22 @@ class CapsulesScreen extends StatefulWidget {
 class _CapsulesScreenState extends State<CapsulesScreen> {
   final List<Capsule> _capsules = [
     const Capsule(
-      title: 'Sample',
-      shortDescription: 'Sample capsule to test',
+      title: 'Burns First aid',
+      shortDescription:
+          'Learn how to identify and treat burns, from minor injuries to major emergencies. Includes first aid steps, when to seek medical help, and important do’s and don’ts for proper burn care.',
       installLink:
-          'https://drive.google.com/uc?export=download&id=1NRd9Vss-nZPIrtyJeTiK36LzZWAKsb_v',
-      uid: 'randomuid',
-      topics: ['news', 'sample'],
+          'https://drive.google.com/uc?export=download&id=1kZP_UBP4WVpyyl1mNrjo7s_kRE1AcS-61kZP_UBP4WVpyyl1mNrjo7s_kRE1AcS-6',
+      uid: 'kRE1AcS',
+      topics: ['first aid', 'burns'],
+    ),
+    const Capsule(
+      title: 'Cuts and scrapes',
+      shortDescription:
+          'Basic care tips for treating minor cuts and scrapes at home, including cleaning, bandaging, and when to seek medical help.',
+      installLink:
+          'https://drive.google.com/uc?export=download&id=1XHEjNFgV-Yr31oB7a_N0r5Z8_Gt7Gm2A',
+      uid: 'N0r5Z8',
+      topics: ['first aid', 'cuts', 'scrapes'],
     ),
   ];
 

@@ -631,7 +631,7 @@ Please provide a helpful response based on the context above and your knowledge.
 
       return '''
 <response>
-<summary>Emergency information from local knowledge base</summary>
+<summary>Information from local knowledge base (Capsules)</summary>
 <detailed_answer>
 Based on your question about "$userMessage", here's relevant information from my offline knowledge:
 
@@ -692,12 +692,20 @@ This response was generated using pre-loaded emergency data capsules designed fo
 
   // Get suggestions for the user
   List<String> getSuggestions(String sessionId) {
+    // Very simple, direct questions that should work with any language model
     return [
-      "What are the basic steps of first aid?",
-      "How do I treat a minor burn?",
-      "What should I do if someone faints?",
-      "How can I stop minor bleeding?",
-      "What items should be in a first aid kit?",
+      "What should I avoid doing when treating a burn or blister?",
+      "What is the best first aid treatment for minor burns?",
+      "What should I avoid when cleaning a minor wound?",
     ];
   }
+
+  // Get available capsules from the capsule search service
+  List<String> getAvailableCapsules() {
+    return _capsuleSearchService.getAvailableCapsules();
+  }
+
+  // System prompt for the assistant
+  final String assistantSystemPrompt =
+      "You are a knowledgeable and friendly assistant. Provide clear, concise, and accurate answers to user queries. If you are unsure, respond with 'I don't know' or suggest alternative ways to find the information.";
 }

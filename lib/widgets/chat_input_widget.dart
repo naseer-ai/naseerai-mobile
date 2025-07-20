@@ -5,9 +5,11 @@ class ChatInputWidget extends StatefulWidget {
   final Function(String) onSend;
   final VoidCallback? onStop;
   final VoidCallback? onShowSuggestions;
+  final VoidCallback? onShowCapsules;
   final bool enabled;
   final bool isStreaming;
   final bool showSuggestionsButton;
+  final bool showCapsulesButton;
 
   const ChatInputWidget({
     super.key,
@@ -15,9 +17,11 @@ class ChatInputWidget extends StatefulWidget {
     required this.onSend,
     this.onStop,
     this.onShowSuggestions,
+    this.onShowCapsules,
     this.enabled = true,
     this.isStreaming = false,
     this.showSuggestionsButton = false,
+    this.showCapsulesButton = false,
   });
 
   @override
@@ -73,6 +77,24 @@ class _ChatInputWidgetState extends State<ChatInputWidget> {
       child: SafeArea(
         child: Row(
           children: [
+            // Capsules button (left side)
+            if (widget.showCapsulesButton && widget.onShowCapsules != null)
+              Material(
+                color: Colors.transparent,
+                child: InkWell(
+                  onTap: widget.onShowCapsules,
+                  borderRadius: BorderRadius.circular(20),
+                  child: Container(
+                    padding: const EdgeInsets.all(10),
+                    child: Icon(
+                      Icons.archive_outlined,
+                      size: 20,
+                      color: theme.colorScheme.primary,
+                    ),
+                  ),
+                ),
+              ),
+            
             // Input field
             Expanded(
               child: Container(

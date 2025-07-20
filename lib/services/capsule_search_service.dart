@@ -351,4 +351,9 @@ class CapsuleSearchService {
     _embeddingsCache.clear();
     _isInitialized = false;
   }
+
+  // Get list of available capsule names
+  List<String> getAvailableCapsules() {
+    return _embeddingsCache.keys.toList();
+  }
 }
