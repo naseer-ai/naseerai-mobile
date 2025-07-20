@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
+import '../utils/constants.dart';
 
 /// Service for managing AI model files
 class ModelManager {
@@ -8,8 +9,8 @@ class ModelManager {
   static ModelManager get instance => _instance ??= ModelManager._();
   ModelManager._();
 
-  static const String _modelFileName = 'qwen2-1_5b-instruct-q4_k_m.gguf';
-  
+  static String get _modelFileName => AppConstants.chatModelName;
+
   /// Get the app's models directory
   Future<Directory> get modelsDirectory async {
     final appDir = await getApplicationDocumentsDirectory();
@@ -34,7 +35,8 @@ class ModelManager {
       // Check if it's a valid GGUF file (not just our placeholder)
       final bytes = await modelFile.openRead(0, 4).first;
       final magic = String.fromCharCodes(bytes);
-      return magic == 'GGUF' && await modelFile.length() > 1000000; // At least 1MB
+      return magic == 'GGUF' &&
+          await modelFile.length() > 1000000; // At least 1MB
     }
     return false;
   }
@@ -51,7 +53,7 @@ class ModelManager {
       // Try to copy from project model_files directory
       final projectModelPath = 'model_files/$_modelFileName';
       final projectFile = File(projectModelPath);
-      
+
       if (await projectFile.exists()) {
         final modelPath = await qwen2ModelPath;
         await projectFile.copy(modelPath);
@@ -64,14 +66,15 @@ class ModelManager {
         return true;
       }
 
-      print('⚠️ Qwen2 1.5B Instruct model not found. Please download it to model_files/$_modelFileName');
+      print(
+          '⚠️ Qwen2 1.5B Instruct model not found. Please download it to model_files/$_modelFileName');
       return false;
     } catch (e) {
       print('❌ Error setting up Qwen2 1.5B Instruct model: $e');
       return false;
     }
   }
-  
+
   /// Try to copy model from Downloads directory to app directory
   Future<bool> _copyFromDownloads() async {
     try {
@@ -83,15 +86,16 @@ class ModelManager {
           return false;
         }
       }
-      
-      final downloadsFile = File('/storage/emulated/0/Download/$_modelFileName');
+
+      final downloadsFile = File('${AppConstants.chatModelDir}$_modelFileName');
       if (await downloadsFile.exists()) {
         final modelPath = await qwen2ModelPath;
         await downloadsFile.copy(modelPath);
-        print('✅ Qwen2 1.5B Instruct model copied from Downloads to app directory');
+        print(
+            '✅ Qwen2 1.5B Instruct model copied from Downloads to app directory');
         return true;
       }
-      
+
       return false;
     } catch (e) {
       print('Error copying from Downloads: $e');
@@ -102,7 +106,7 @@ class ModelManager {
   /// Get all available GGUF models
   Future<List<String>> getAvailableModels() async {
     final models = <String>[];
-    
+
     try {
       // Check app's models directory
       final modelsDir = await modelsDirectory;
@@ -111,22 +115,22 @@ class ModelManager {
           models.add(entity.path);
         }
       }
-      
+
       // Also check Downloads directory for GGUF models
       await _checkDownloadsDirectory(models);
     } catch (e) {
       print('Error scanning models: $e');
     }
-    
+
     return models;
   }
-  
+
   /// Check Downloads directory for GGUF models with proper permissions
   Future<void> _checkDownloadsDirectory(List<String> models) async {
     try {
       // Try different permission strategies based on Android version
       bool hasPermission = false;
-      
+
       // Try manage external storage permission (Android 11+)
       if (await Permission.manageExternalStorage.isGranted) {
         hasPermission = true;
@@ -143,13 +147,13 @@ class ModelManager {
           hasPermission = storageStatus.isGranted;
         }
       }
-      
+
       if (!hasPermission) {
         print('Storage permission denied');
         return;
       }
-      
-      final downloadsDir = Directory('/storage/emulated/0/Download');
+
+      final downloadsDir = Directory(AppConstants.chatModelDir);
       if (await downloadsDir.exists()) {
         print('Scanning Downloads directory for GGUF models...');
         await for (final entity in downloadsDir.list()) {
