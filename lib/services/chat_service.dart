@@ -639,9 +639,6 @@ $contextualInfo
 
 This information is stored locally and doesn't require internet access.
 </detailed_answer>
-<additional_info>
-This response was generated using pre-loaded emergency data capsules designed for offline use during crisis situations.
-</additional_info>
 </response>
       '''
           .trim();
@@ -677,6 +674,16 @@ This response was generated using pre-loaded emergency data capsules designed fo
             RegExp(r'\s+([.,!?;:])'), r'$1') // Fix spacing before punctuation
         .replaceAll(
             RegExp(r'([.,!?;:])\s*'), r'$1 ') // Ensure space after punctuation
+        // Remove markdown formatting artifacts and unwanted symbols
+        .replaceAll(RegExp(r'\$\d+'), '') // Remove $1, $2, etc.
+        .replaceAll(RegExp(r'[●•]'), '•') // Normalize bullet points
+        .replaceAll(RegExp(r'\*\s*'), '• ') // Convert asterisks to bullet points
+        .replaceAll(RegExp(r'[-−]\s*'), '• ') // Convert dashes to bullet points
+        .replaceAll(RegExp(r'\d+\.\s*'), '• ') // Convert numbered lists to bullet points
+        .replaceAll(RegExp(r'#{1,6}\s*'), '') // Remove markdown headers
+        .replaceAll(RegExp(r'\*\*(.*?)\*\*'), r'$1') // Remove bold formatting
+        .replaceAll(RegExp(r'\*(.*?)\*'), r'$1') // Remove italic formatting
+        .replaceAll(RegExp(r'`(.*?)`'), r'$1') // Remove code formatting
         .trim();
 
     return cleaned;
@@ -694,9 +701,8 @@ This response was generated using pre-loaded emergency data capsules designed fo
   List<String> getSuggestions(String sessionId) {
     // Very simple, direct questions that should work with any language model
     return [
-      "What should I avoid doing when treating a burn or blister?",
-      "What is the best first aid treatment for minor burns?",
-      "What should I avoid when cleaning a minor wound?",
+      "Burns Treatment",
+      "Cuts and Scrapes Treatment",
     ];
   }
 

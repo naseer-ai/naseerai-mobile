@@ -33,7 +33,7 @@ class _CapsulesScreenState extends State<CapsulesScreen> {
       shortDescription:
           'Learn how to identify and treat burns, from minor injuries to major emergencies. Includes first aid steps, when to seek medical help, and important do’s and don’ts for proper burn care.',
       installLink:
-          'https://drive.google.com/uc?export=download&id=1kZP_UBP4WVpyyl1mNrjo7s_kRE1AcS-61kZP_UBP4WVpyyl1mNrjo7s_kRE1AcS-6',
+          'https://raw.githubusercontent.com/naseer-ai/naseerai-mobile/refs/heads/dev/sample_capsules/Burns_First_aid_embeddings.json',
       uid: 'kRE1AcS',
       topics: ['first aid', 'burns'],
     ),
