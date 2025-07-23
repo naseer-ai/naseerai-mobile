@@ -44,16 +44,20 @@ android {
             }
         }
 
-        // External native build configuration - DISABLED
+        // External native build configuration - DISABLED (using pre-built jniLibs)
         // externalNativeBuild {
         //     cmake {
-        //         arguments("-DCMAKE_BUILD_TYPE=Release")
-        //         cppFlags("-std=c++17")
+        //         arguments(
+        //             "-DCMAKE_BUILD_TYPE=Release",
+        //             "-DANDROID_STL=c++_shared",
+        //             "-DANDROID_CPP_FEATURES=rtti exceptions"
+        //         )
+        //         cppFlags("-std=c++17", "-fPIC")
         //     }
         // }
     }
 
-    // External native build configuration - DISABLED
+    // External native build configuration - DISABLED (using pre-built jniLibs)
     // externalNativeBuild {
     //     cmake {
     //         path = file("src/main/cpp/CMakeLists.txt")

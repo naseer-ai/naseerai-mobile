@@ -54,23 +54,61 @@ target_compile_options(naseer_model PRIVATE
     -O3
     -ffast-math
     -funroll-loops
+    -ftree-vectorize
+    -fomit-frame-pointer
 )
+
+# Android ARM-specific optimizations
+if(ANDROID)
+    # ARM64 optimizations (aarch64 - no mfpu/mfloat-abi needed)
+    if(CMAKE_ANDROID_ARCH_ABI STREQUAL "arm64-v8a")
+        target_compile_options(naseer_model PRIVATE
+            -march=armv8-a
+            -mtune=cortex-a53
+            -DARM_NEON
+        )
+    # ARM32 optimizations  
+    elseif(CMAKE_ANDROID_ARCH_ABI STREQUAL "armeabi-v7a")
+        target_compile_options(naseer_model PRIVATE
+            -march=armv7-a
+            -mtune=cortex-a9
+            -mfpu=neon
+            -mfloat-abi=hard
+            -DARM_NEON
+        )
+    # x86_64 optimizations
+    elseif(CMAKE_ANDROID_ARCH_ABI STREQUAL "x86_64")
+        target_compile_options(naseer_model PRIVATE
+            -march=x86-64
+            -mtune=generic
+            -msse4.2
+        )
+    endif()
+    
+    # Additional Android-specific performance flags
+    target_compile_options(naseer_model PRIVATE
+        -DANDROID_OPTIMIZED
+        -fPIC
+        -ffunction-sections
+        -fdata-sections
+    )
+endif()
 
 # Android-specific compiler flags
 if(ANDROID)
     target_compile_options(naseer_model PRIVATE
-        -Wno-error=cast-to-pointer-from-smaller-type
-        -Wno-error=cast-from-pointer-to-smaller-type
+        -Wno-cast-to-pointer-from-smaller-type
+        -Wno-cast-from-pointer-to-smaller-type
         -D__ANDROID_API__=21
     )
     # Target llama.cpp libraries with same flags
     target_compile_options(llama PRIVATE
-        -Wno-error=cast-to-pointer-from-smaller-type
-        -Wno-error=cast-from-pointer-to-smaller-type
+        -Wno-cast-to-pointer-from-smaller-type
+        -Wno-cast-from-pointer-to-smaller-type
     )
     target_compile_options(ggml PRIVATE
-        -Wno-error=cast-to-pointer-from-smaller-type
-        -Wno-error=cast-from-pointer-to-smaller-type
+        -Wno-cast-to-pointer-from-smaller-type
+        -Wno-cast-from-pointer-to-smaller-type
     )
 endif()
 

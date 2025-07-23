@@ -5,7 +5,14 @@
 #include <algorithm>
 #include <random>
 #include <ctime>
+#include <thread>
+#include <chrono>
 #include "llama.h"
+
+#ifdef __ANDROID__
+#include <unistd.h>
+#include <sys/sysinfo.h>
+#endif
 
 struct TextGenerator::ModelData {
     // Legacy fields for compatibility
@@ -33,6 +40,56 @@ struct TextGenerator::ModelData {
         }
     }
 };
+
+// Android-optimized CPU thread detection
+int get_optimal_thread_count() {
+#ifdef __ANDROID__
+    // Get hardware thread count
+    int hardware_threads = std::thread::hardware_concurrency();
+    
+    // Cap threads for mobile devices to prevent overheating and battery drain
+    // Reserve 1-2 threads for UI and system processes
+    int optimal_threads = std::max(1, std::min(hardware_threads - 1, 4));
+    
+    // For devices with fewer cores, be more conservative
+    if (hardware_threads <= 2) {
+        optimal_threads = 1;
+    } else if (hardware_threads <= 4) {
+        optimal_threads = 2;
+    }
+    
+    return optimal_threads;
+#else
+    return std::max(1, static_cast<int>(std::thread::hardware_concurrency()) - 1);
+#endif
+}
+
+// Android-optimized context size based on available memory
+int get_optimal_context_size() {
+#ifdef __ANDROID__
+    // Default to smaller context for mobile
+    int base_context = 1024;
+    
+    // Try to get system info to adjust context size
+    struct sysinfo info;
+    if (sysinfo(&info) == 0) {
+        // Available RAM in GB (rough estimate)
+        long available_gb = info.freeram / (1024 * 1024 * 1024);
+        
+        if (available_gb >= 6) {
+            base_context = 2048;  // High-end devices
+        } else if (available_gb >= 4) {
+            base_context = 1536;  // Mid-range devices
+        } else {
+            base_context = 1024;  // Low-end devices
+        }
+    }
+    
+    return base_context;
+#else
+    return 2048;  // Desktop default
+#endif
+}
 
 TextGenerator::TextGenerator() : m_data(std::make_unique<ModelData>()) {
     std::srand(std::time(nullptr));
@@ -103,9 +160,9 @@ std::string TextGenerator::generate_with_llama(const std::string& prompt, int ma
     // Create context if not exists
     if (!m_data->llama_context) {
         llama_context_params ctx_params = llama_context_default_params();
-        ctx_params.n_ctx = 2048;        // Context size
-        ctx_params.n_batch = 512;       // Batch size for prompt processing
-        ctx_params.n_threads = 4;       // Number of threads (good for mobile)
+        ctx_params.n_ctx = get_optimal_context_size();     // Adaptive context size
+        ctx_params.n_batch = 128;                          // Conservative batch size for mobile
+        ctx_params.n_threads = get_optimal_thread_count(); // Dynamic thread detection
         
         m_data->llama_context = llama_init_from_model(m_data->llama_model, ctx_params);
         
@@ -138,13 +195,28 @@ std::string TextGenerator::generate_with_llama(const std::string& prompt, int ma
         return "Error: Failed to process prompt";
     }
     
-    // Generate response
+    // Generate response with timeout mechanism
     std::string response;
     int n_generated = 0;
+    const auto start_time = std::chrono::steady_clock::now();
+    const auto timeout_duration = std::chrono::seconds(30); // 30 second timeout
     
     while (n_generated < max_tokens) {
-        // Sample next token
-        llama_token next_token = sample_token(m_data->llama_context);
+        // Check for timeout to prevent hanging
+        auto current_time = std::chrono::steady_clock::now();
+        if (current_time - start_time > timeout_duration) {
+            response += "\n[Generation timeout - partial response]";
+            break;
+        }
+        
+        // Sample next token with error handling
+        llama_token next_token;
+        try {
+            next_token = sample_token(m_data->llama_context);
+        } catch (...) {
+            response += "\n[Token sampling error]";
+            break;
+        }
         
         // Check for end of sequence
         const llama_vocab* vocab = llama_model_get_vocab(m_data->llama_model);
@@ -160,12 +232,18 @@ std::string TextGenerator::generate_with_llama(const std::string& prompt, int ma
             response.append(token_str, token_len);
         }
         
-        // Process the new token
+        // Process the new token with error handling
         if (llama_decode(m_data->llama_context, llama_batch_get_one(&next_token, 1))) {
+            response += "\n[Decoding error - stopping generation]";
             break;
         }
         
         n_generated++;
+        
+        // Add periodic yield for mobile responsiveness
+        if (n_generated % 10 == 0) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
     }
     
     return response;
